@@ -1,0 +1,37 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*.class
+
+# Temporary outputs & runtime artifacts
+output/*
+output/**/*
+!output/.gitkeep
+
+# Node.js dependencies
+frontend/node_modules/
+frontend/.npm/
+frontend/.vite/
+
+# Environments
+.env
+.env.local
+.venv/
+venv/
+ENV/
+env/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs & sqlite
+*.log
+*.sqlite3

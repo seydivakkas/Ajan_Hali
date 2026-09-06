@@ -1,0 +1,184 @@
+{
+  "name": "Merinos Standard 16-Renk Dokuma Cağlık Paleti (Heatset BCF & Polyester)",
+  "version": "2026.1",
+  "dtex_default": 1800,
+  "pile_height_default_mm": 11.5,
+  "colors": [
+    {
+      "code": "YRN-01",
+      "name": "Krem Ekru",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [245, 240, 225],
+      "lab": [94.5, -0.8, 8.2],
+      "cost_per_kg_tl": 145.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 850.0
+    },
+    {
+      "code": "YRN-02",
+      "name": "Kemik Bej",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [220, 210, 190],
+      "lab": [84.1, 0.5, 11.8],
+      "cost_per_kg_tl": 145.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 620.0
+    },
+    {
+      "code": "YRN-03",
+      "name": "Vizon Gri",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [170, 160, 150],
+      "lab": [66.2, 1.8, 6.5],
+      "cost_per_kg_tl": 148.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 450.0
+    },
+    {
+      "code": "YRN-04",
+      "name": "Antrasit Koyu Gri",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [65, 68, 72],
+      "lab": [28.5, -0.6, -2.5],
+      "cost_per_kg_tl": 150.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 780.0
+    },
+    {
+      "code": "YRN-05",
+      "name": "Gece Mavisi / Klasik Lacivert",
+      "material": "Micro Polyester",
+      "dtex": 1650,
+      "rgb": [22, 38, 70],
+      "lab": [16.2, 3.8, -22.5],
+      "cost_per_kg_tl": 172.0,
+      "bobbin_weight_kg": 4.0,
+      "stock_kg": 340.0
+    },
+    {
+      "code": "YRN-06",
+      "name": "Safir Açık Mavi",
+      "material": "Micro Polyester",
+      "dtex": 1650,
+      "rgb": [78, 125, 175],
+      "lab": [51.5, -4.2, -31.0],
+      "cost_per_kg_tl": 175.0,
+      "bobbin_weight_kg": 4.0,
+      "stock_kg": 180.0
+    },
+    {
+      "code": "YRN-07",
+      "name": "Zümrüt Yeşili",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [35, 95, 65],
+      "lab": [36.8, -27.5, 12.0],
+      "cost_per_kg_tl": 155.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 210.0
+    },
+    {
+      "code": "YRN-08",
+      "name": "Adaçayı Yumuşak Yeşil",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [155, 175, 145],
+      "lab": [69.2, -12.5, 13.2],
+      "cost_per_kg_tl": 152.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 290.0
+    },
+    {
+      "code": "YRN-09",
+      "name": "Klasik Yakut Bordo",
+      "material": "Micro Polyester",
+      "dtex": 1650,
+      "rgb": [115, 25, 38],
+      "lab": [24.8, 40.5, 18.2],
+      "cost_per_kg_tl": 180.0,
+      "bobbin_weight_kg": 4.0,
+      "stock_kg": 510.0
+    },
+    {
+      "code": "YRN-10",
+      "name": "Kiremit / Terracotta",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [178, 82, 55],
+      "lab": [46.2, 36.8, 33.5],
+      "cost_per_kg_tl": 158.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 320.0
+    },
+    {
+      "code": "YRN-11",
+      "name": "Hardal Sarısı / Altın İpek",
+      "material": "Micro Polyester",
+      "dtex": 1650,
+      "rgb": [215, 168, 60],
+      "lab": [70.5, 8.2, 60.5],
+      "cost_per_kg_tl": 185.0,
+      "bobbin_weight_kg": 4.0,
+      "stock_kg": 150.0
+    },
+    {
+      "code": "YRN-12",
+      "name": "Sıcak Taba Kahve",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [110, 68, 45],
+      "lab": [33.5, 16.5, 23.8],
+      "cost_per_kg_tl": 150.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 420.0
+    },
+    {
+      "code": "YRN-13",
+      "name": "Gül Kurusu Pudra",
+      "material": "Micro Polyester",
+      "dtex": 1650,
+      "rgb": [198, 142, 148],
+      "lab": [64.2, 23.5, 6.2],
+      "cost_per_kg_tl": 178.0,
+      "bobbin_weight_kg": 4.0,
+      "stock_kg": 230.0
+    },
+    {
+      "code": "YRN-14",
+      "name": "Koyu Kahve / Acı Çikolata",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [48, 32, 25],
+      "lab": [15.2, 7.5, 8.8],
+      "cost_per_kg_tl": 150.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 390.0
+    },
+    {
+      "code": "YRN-15",
+      "name": "Gümüş İpek Vurgu",
+      "material": "Micro Polyester Parlak",
+      "dtex": 1200,
+      "rgb": [210, 218, 225],
+      "lab": [86.8, -1.5, -4.2],
+      "cost_per_kg_tl": 195.0,
+      "bobbin_weight_kg": 3.5,
+      "stock_kg": 140.0
+    },
+    {
+      "code": "YRN-16",
+      "name": "Derin Siyah / Zemin Kontur",
+      "material": "PP Heatset BCF",
+      "dtex": 1800,
+      "rgb": [20, 20, 22],
+      "lab": [7.8, 0.2, -0.8],
+      "cost_per_kg_tl": 146.0,
+      "bobbin_weight_kg": 4.5,
+      "stock_kg": 920.0
+    }
+  ]
+}

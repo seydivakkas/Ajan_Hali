@@ -1,0 +1,28 @@
+# Ajan Hali uyumlu QTX-benzeri aktarim dosyasi; cihazdan alinmis yerel QTX degildir.
+# SOURCE: Danny Pascale, BabelColor, RGB coordinates of the Macbeth ColorChecker
+# SOURCE_URL: https://babelcolor.com/index_htm_files/RGB%20Coordinates%20of%20the%20Macbeth%20ColorChecker.pdf
+# SOURCE_DATE: 2006-06-01
+# SOURCE_TABLE: Table 1b, BabelColor Avg. columns, patches 13-18
+# DATA: Lab derived from averaged measured spectra of 20 ColorChecker charts
+# ILLUMINANT: D50
+# WARNING: Color reference chart measurements, NOT factory yarn measurements.
+# WARNING: Not D65/10 degree data. No conversion has been applied.
+# No stock, price, material, dtex or bobbin values are supplied.
+
+NAME: BabelColor CC13 - blue - D50 referans
+CIELAB: 28.65 15.60 -50.52
+
+NAME: BabelColor CC14 - green - D50 referans
+CIELAB: 55.05 -38.09 31.62
+
+NAME: BabelColor CC15 - red - D50 referans
+CIELAB: 42.18 54.89 28.79
+
+NAME: BabelColor CC16 - yellow - D50 referans
+CIELAB: 82.23 4.05 79.84
+
+NAME: BabelColor CC17 - magenta - D50 referans
+CIELAB: 51.82 49.79 -13.90
+
+NAME: BabelColor CC18 - cyan - D50 referans
+CIELAB: 50.55 -27.97 -28.14
