@@ -9,10 +9,10 @@ React/Tailwind stüdyosu ve FastAPI görüntü işleme motoru. Çalışan uygula
 `start_studio.bat` veya proje kökünde:
 
 ```powershell
-python -m uvicorn api.server:app --host 127.0.0.1 --port 8000
+python -m uvicorn api.server:app --host 127.0.0.1 --port 8001
 ```
 
-Stüdyo: http://127.0.0.1:8000 — API dokümanı: http://127.0.0.1:8000/docs
+Stüdyo: http://127.0.0.1:8001 — API dokümanı: http://127.0.0.1:8001/docs
 
 Frontend değişikliklerinden sonra `frontend` klasöründe `npm run build` çalıştırın. Çalışan Python sunucusunu backend değişikliklerinde yeniden başlatın.
 
