@@ -160,6 +160,51 @@ DNS ve firma cihazlarından erişim bağımsız test edilmeden üretim
 açılışı yapılmaz. Doğrudan IP'ye bağlama, internet güvenlik taraması,
 ayrı ağ segmenti, merkezi log/izleme ve yedeklemeler ayrıca gerekir.
 
+## Firma bazlı şifreli yedekleme ve geri yükleme (offline P0)
+
+Sadece `workspace` modunda **uygulamanın tüm süreçlerini durdurduktan
+sonra** kullanın. Sunucu açıkken alınan yedeğin SQLite, görsel ve JSON
+kayıtları arasında tam tutarlı olduğu garanti edilmez. Bu araç otomatik
+olarak hizmetin durduğunu algılamaz; `--service-stopped` bir operatör
+beyanıdır ve üretim otomasyonu için kilit/maintenance denetimi
+tamamlanmalıdır.
+
+```powershell
+$env:AJAN_HALI_AUTH_MODE = "workspace"
+
+# Ajan Halı sunucusunu önceden durdurun.
+python -m core.workspace_backup backup --workspace alfa_tekstil `
+  --file ".\\alfa_tekstil-20261009.ahb" --service-stopped
+
+# Mevcut firma klasörünün üzerine ASLA yazılmaz.
+# Yeni sunucuda önce aynı firma kimliğini oluşturun:
+python -m core.access_control add-workspace alfa_tekstil "Alfa Tekstil"
+
+python -m core.workspace_backup restore --workspace alfa_tekstil `
+  --file ".\\alfa_tekstil-20261009.ahb" --service-stopped
+```
+
+Parola komut satırında verilmez; görünmeden sorulur (minimum 12 karakter).
+Arşivde AES-256-GCM, rastgele salt/nonce ve scrypt anahtar türetme
+kullanılır; **parola kaybolursa yedek açılamaz**. Dosya isimleri dahil
+manifest ve içerik şifrelenir. Değişiklik algılamak için SHA-256 ve GCM
+kimlik doğrulaması uygulanır. Geri yükleme farklı firma kimliğini,
+arşive eklenmiş listelenmeyen dosyaları, mutasyona uğramış içeriği,
+`../` yol geçişini, sembolik bağlantıyı ve var olan firma dizinine
+yazmayı reddeder. SQLite dosyaları `integrity_check` ile kontrol edilir.
+
+**Sınırlar:** Şimdiki uygulama 256 MiB açık veri, 192 MiB sıkıştırılmış
+arşiv ve 15.000 dosya sınırına sahiptir; daha büyük işler için akış
+bazlı şifreleme/snapshot geliştirilmelidir. Sadece firma içindeki
+`factory_settings.json`, `supplier_catalog.json` ve `jobs/`
+ağacı yedeklenir. Merkezi `output/auth.sqlite3` içindeki kullanıcı,
+parola özeti ve firma üyelikleri **bu arşive dahil değildir**. Yeni
+sunucuda kullanıcıları ayrıca oluşturun; mevcut firma dizini varsa
+önce bağımsız ve kayıtlı migrasyon/geri alma planı hazırlayın.
+Yedekleri depo dışına veya erişim kısıtlamalı bir ortama alın; tek
+yedek işletim riski oluşturur. Windows dosya ACL'leri ve gerçek
+cihazda kurtarma tatbikatı olmadan dağıtım onaylanmaz.
+
 ## Başlatma
 
 `start_studio.bat` veya proje kökünde:
