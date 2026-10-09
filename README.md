@@ -22,6 +22,44 @@ Tarayıcıda `http://127.0.0.1:8001` açılır. İsteğe bağlı FastSAM modeli 
 
 **Güvenlik sınırı:** API halen kullanıcı kimlik doğrulaması içermez. Yalnız `127.0.0.1` üzerinde çalıştırın; ağ/İnternet erişimine açmayın. Tarayıcı kökeni kısıtlaması kullanıcı kimlik doğrulamasının yerine geçmez. `factory_settings.json` ve `supplier_catalog.json` yerel çalışma verileridir, Git'e eklenmez. Daha önce bu dosyaları özelleştirdiyseniz güncelleme yapmadan önce yedekleyin.
 
+## Kullanıcı oturumları ve yetki modeli (yerel beta)
+
+Varsayılan `AJAN_HALI_AUTH_MODE=local`: mevcut tek kullanıcılı yerel stüdyo çalışır,
+ancak gerçek bir oturum/rol kontrolü etkin **değildir**. Uygulama DNS-rebinding
+kontrolüyle yalnızca loopback adresinden ve `localhost`/`127.0.0.1`
+Host değeriyle kullanılabilir. **Firmaya açılacak bir sunucu için bu mod uygun
+değildir.**
+
+Yerel cihazda oturum koruması etkinleştirmek için PowerShell'de:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m core.access_control add-user yonetici --role ADMIN
+$env:AJAN_HALI_AUTH_MODE = "session"
+.\\.venv\\Scripts\\python.exe -m uvicorn api.server:app --host 127.0.0.1 --port 8001
+```
+
+Komut parolayı ekranda göstermeden ister (en az 12 karakter). Diğer rolleri
+`--role DESIGNER` veya `--role OPERATOR` ile oluşturabilirsiniz.
+Bir hesabı ve tüm oturumlarını kapatmak için:
+`python -m core.access_control disable-user <kullanici>`.
+
+`ADMIN`: fabrika ayarları, katalog, analiz, stüdyo ve kayıt yönetimi.
+`DESIGNER`: kayıtları okur, analiz yapar, stüdyo revizyonu/inceleme oluşturur;
+fabrika ayarlarını değiştiremez.
+`OPERATOR`: analiz/ön kontrol kayıtlarını salt okunur açabilir; üretim sevki
+için yetki veya doğrulanmış tezgâh adaptörü verilmez.
+
+Oturumlar 8 saatlik sunucu tarafı SQLite kayıtlarıdır (`output/auth.sqlite3`);
+parolalar rastgele tuzlanmış scrypt özetiyle tutulur. Tarayıcıda HttpOnly,
+SameSite=Strict çerezi ve yazma işlemlerinde sunucu doğrulamalı CSRF kullanılır.
+Oturum kapatılabilir, kullanıcı devre dışı bırakılınca aktif oturumlar iptal olur.
+
+**Sınırlar:** Bu ilk sürüm tek şirket/tek cihaz içindir. TLS'li uzaktan erişim,
+çok şirketli veri ayrımı, giriş denemesi hız sınırı, merkezi kullanıcı/kimlik
+yönetimi ve ayrıntılı nesne düzeyi yetkiler henüz yoktur. 0.0.0.0/LAN/İnternet
+üzerine yayınlamak yasaktır; `session` modu bunları güvenli kılmaz. Bu çalışmalar
+Issue #2 kapsamında açık kalır.
+
 ## Başlatma
 
 `start_studio.bat` veya proje kökünde:

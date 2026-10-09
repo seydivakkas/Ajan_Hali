@@ -1,3 +1,4 @@
+import { apiFetch } from './auth';
 import { CatalogSnapshot } from './catalog';
 export interface FactoryYarn {
   is_demo?: boolean;
@@ -16,11 +17,11 @@ async function response(res: Response) {
     throw new Error(Array.isArray(detail) ? detail.map((e: any) => `${e.loc.join('.')}: ${e.msg}`).join('\n') : detail || 'Ayarlar kaydedilemedi.'); }
   return res.json();
 }
-export async function fetchSettings(): Promise<FactorySettings> { return response(await fetch(`${base}/api/v1/settings`)); }
+export async function fetchSettings(): Promise<FactorySettings> { return response(await apiFetch(`${base}/api/v1/settings`)); }
 export async function changeDemoInventory(revision: number, remove = false): Promise<FactorySettings> {
-  return response(await fetch(`${base}/api/v1/demo/inventory`, {method:remove?'DELETE':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({revision})}));
+  return response(await apiFetch(`${base}/api/v1/demo/inventory`, {method:remove?'DELETE':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({revision})}));
 }
 export async function deleteDemoJobs(): Promise<{removed:number}> {
-  return response(await fetch(`${base}/api/v1/demo/jobs`, {method:'DELETE'}));
+  return response(await apiFetch(`${base}/api/v1/demo/jobs`, {method:'DELETE'}));
 }
-export async function putSettings(settings: FactorySettings): Promise<FactorySettings> { return response(await fetch(`${base}/api/v1/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })); }
+export async function putSettings(settings: FactorySettings): Promise<FactorySettings> { return response(await apiFetch(`${base}/api/v1/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })); }
