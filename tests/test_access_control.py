@@ -52,9 +52,9 @@ class LocalAuthTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/auth/session").json()["role"], "ADMIN")
         self.assertEqual(self.client.delete("/api/v1/demo/jobs").status_code, 403)
         # Admin is authorized but the supplied revision is invalid: endpoint validation is reached.
-        result = self.client.put("/api/v1/settings", headers={"X-CSRF-Token": token}, json={})
-        self.assertNotEqual(result.status_code, 401)
-        self.assertNotEqual(result.status_code, 403)
+        result = self.client.put("/api/v1/settings",
+                                 headers={"X-CSRF-Token": token}, json={"revision": "invalid"})
+        self.assertEqual(result.status_code, 422)
         self.assertEqual(self.client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": token}).status_code, 200)
         self.assertEqual(self.client.get("/api/v1/auth/session").status_code, 401)
 
