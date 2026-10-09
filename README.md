@@ -53,9 +53,14 @@ Oturumlar 8 saatlik sunucu tarafı SQLite kayıtlarıdır (`output/auth.sqlite3`
 parolalar rastgele tuzlanmış scrypt özetiyle tutulur. Tarayıcıda HttpOnly,
 SameSite=Strict çerezi ve yazma işlemlerinde sunucu doğrulamalı CSRF kullanılır.
 Oturum kapatılabilir, kullanıcı devre dışı bırakılınca aktif oturumlar iptal olur.
+Aynı kullanıcı adıyla 15 dakikada 5 başarısız giriş sonrasında, doğru parola
+verilse bile 15 dakikalık geçici kilit uygulanır (HTTP 429, Retry-After).
+Başarısız deneme sayaçları SQLite içinde tutulur; bu temel koruma, çok
+kullanıcılı/İnternet erişimli kurulumda IP bazlı hız sınırı, WAF ve
+izleme gereksinimlerinin yerine geçmez.
 
 **Sınırlar:** Bu ilk sürüm tek şirket/tek cihaz içindir. TLS'li uzaktan erişim,
-çok şirketli veri ayrımı, giriş denemesi hız sınırı, merkezi kullanıcı/kimlik
+çok şirketli veri ayrımı, ağ kenarı IP hız sınırı, merkezi kullanıcı/kimlik
 yönetimi ve ayrıntılı nesne düzeyi yetkiler henüz yoktur. 0.0.0.0/LAN/İnternet
 üzerine yayınlamak yasaktır; `session` modu bunları güvenli kılmaz. Bu çalışmalar
 Issue #2 kapsamında açık kalır.
