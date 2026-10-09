@@ -125,6 +125,41 @@ uzaktan erişim, merkezi audit ve ağ katmanı saldırı koruması sağlamaz.
 `workspace` modu da **yalnızca `127.0.0.1` üzerinde** çalışmalıdır.
 Bu sürüm çok kiracılı İnternet SaaS'ı olarak yayınlanamaz.
 
+## Doğrudan TLS dağıtımı — güvenlik sınırı
+
+`AJAN_HALI_DEPLOYMENT_MODE=direct-tls` **yalnızca** `workspace`
+kimlik doğrulaması, geçerli sertifika/özel anahtar ve HTTPS ile çalışır.
+Bu mod yalnızca doğrudan Python Uvicorn TLS sonlandırması içindir;
+`X-Forwarded-*` veya ters proxy desteği **yoktur**. Tek bir
+DNS adı/IP ve HTTPS portu whitelist'e alınır. Ücretsiz yerel ağ
+sertifikası üretilebilir, ancak tarayıcı ve istemcilerin sertifikaya
+güvenmesi ayrıca yönetilmelidir.
+
+Örnek PowerShell (gerçek sertifikanızı güvenli bir yerden temin edin;
+sunucunun ağ arayüzü ve DNS'i size ait olmalı):
+
+```powershell
+$env:AJAN_HALI_AUTH_MODE = "workspace"
+
+python -m core.secure_server --host factory.example.com --bind 192.0.2.10 --port 8443 `
+  --certfile "C:\\secure\\factory-chain.pem" --keyfile "C:\\secure\\factory-key.pem"
+```
+
+Bu satırdaki alan adı ve IP **örnektir**, çalıştırmadan önce gerçek
+kurulumunuzun değerleriyle değiştirin. Sertifika özel anahtarını depoya
+eklemeyin. `direct-tls` modunda düz HTTP, kimliği belirsiz Host,
+beklenmedik Origin ve forwarded başlıkları reddedilir. Oturum
+çerezleri `Secure; HttpOnly; SameSite=Strict` ile ayarlanır;
+güvenilir HTTPS yanıtlarında HSTS, no-store, nosniff uygulanır.
+`session` veya `local` modları bu şekilde dışa açılamaz.
+
+**Operasyonel HOLD:** Yerel testlerde HTTPS reddetme politikası
+doğrulansa bile gerçek Windows/ağ cihazında TLS el sıkışması,
+sertifika zinciri, Windows Firewall, servis hesabı, anahtar ACL'leri,
+DNS ve firma cihazlarından erişim bağımsız test edilmeden üretim
+açılışı yapılmaz. Doğrudan IP'ye bağlama, internet güvenlik taraması,
+ayrı ağ segmenti, merkezi log/izleme ve yedeklemeler ayrıca gerekir.
+
 ## Başlatma
 
 `start_studio.bat` veya proje kökünde:
