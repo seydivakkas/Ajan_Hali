@@ -31,6 +31,7 @@ from core.supplier_catalog import SupplierCatalog, append_catalog, catalog_view,
 from core.preflight import PreflightResult, evaluate_preflight
 from core import evidence_registry as evidence
 from core import access_control as auth
+from core import tls_policy
 
 app = FastAPI(
     title="Industrial Carpet AI: Competitor Photo to CAD & Yarn Recipe API",
@@ -60,7 +61,10 @@ app.add_middleware(
 @app.middleware("http")
 async def enforce_local_browser_origin(request: Request, call_next):
     origin = request.headers.get("origin")
-    if origin is not None and origin not in TRUSTED_BROWSER_ORIGINS:
+    if tls_policy.deployment_mode() == "direct-tls":
+        if not tls_policy.origin_allowed(origin):
+            return JSONResponse(status_code=403, content={"detail": "Untrusted HTTPS Origin."})
+    elif origin is not None and origin not in TRUSTED_BROWSER_ORIGINS:
         return JSONResponse(status_code=403, content={"detail": "Bu yerel API başka bir web kökeninden kullanılamaz."})
     return await call_next(request)
 
@@ -69,18 +73,40 @@ async def enforce_local_browser_origin(request: Request, call_next):
 async def protect_local_data(request: Request, call_next):
     # Network peer and Host both matter: Host filtering defends DNS rebinding,
     # the peer check defends accidental --host 0.0.0.0 exposure.
-    if not auth.is_loopback_client(request.client.host if request.client else None):
-        return JSONResponse(status_code=403, content={"detail": "API yalnızca yerel bilgisayarda kullanılabilir."})
-    if not auth.is_local_host_header(request.headers.get("host", "")):
-        return JSONResponse(status_code=403, content={"detail": "Güvenilmeyen Host başlığı."})
+    direct_tls = tls_policy.deployment_mode() == "direct-tls"
+    if direct_tls:
+        if auth.mode() != "workspace":
+            return JSONResponse(status_code=403, content={"detail": "TLS requires workspace authentication."})
+        if request.url.scheme != "https":
+            return JSONResponse(status_code=403, content={"detail": "HTTPS required."})
+        if not tls_policy.host_allowed(request.headers.get("host", "")):
+            return JSONResponse(status_code=403, content={"detail": "Untrusted TLS Host."})
+        # This profile terminates TLS directly. Do not trust forwarding headers.
+        if any(k.startswith("x-forwarded-") or k == "forwarded" for k in request.headers):
+            return JSONResponse(status_code=403, content={"detail": "Forwarded headers are not trusted."})
+    else:
+        if not auth.is_loopback_client(request.client.host if request.client else None):
+            return JSONResponse(status_code=403, content={"detail": "API yalnızca yerel bilgisayarda kullanılabilir."})
+        if not auth.is_local_host_header(request.headers.get("host", "")):
+            return JSONResponse(status_code=403, content={"detail": "Güvenilmeyen Host başlığı."})
+
+    async def response_with_security():
+        result = await call_next(request)
+        if direct_tls:
+            result.headers["Strict-Transport-Security"] = "max-age=31536000"
+            result.headers["X-Content-Type-Options"] = "nosniff"
+            result.headers["Referrer-Policy"] = "no-referrer"
+            if request.url.path.startswith(("/api/", "/static/")):
+                result.headers["Cache-Control"] = "no-store"
+        return result
 
     if auth.mode() == "local":
-        return await call_next(request)
+        return await response_with_security()
 
     path = request.url.path
     if request.method == "OPTIONS" or path in {"/", "/api/v1/health", "/api/v1/auth/login",
                                                "/openapi.json", "/docs", "/redoc"} or path.startswith("/assets/"):
-        return await call_next(request)
+        return await response_with_security()
 
     principal = auth.resolve_session(request.cookies.get(auth.SESSION_COOKIE))
     if principal is None:
@@ -100,10 +126,10 @@ async def protect_local_data(request: Request, call_next):
             return JSONResponse(status_code=403, content={"detail": "Firma alanı atanmamış."})
         token = auth.set_workspace_context(workspace_id)
         try:
-            return await call_next(request)
+            return await response_with_security()
         finally:
             auth.clear_workspace_context(token)
-    return await call_next(request)
+    return await response_with_security()
 
 
 # Output directory setup
@@ -162,10 +188,9 @@ def auth_login(credentials: auth.LoginPayload, response: Response):
         raise HTTPException(401, "Kullanıcı adı veya parola hatalı.")
     auth.clear_login_failures(credentials.username)
     token, csrf = auth.new_session(principal)
-    # Only loopback HTTP is supported. Before TLS-backed remote deployment,
-    # enable Secure and implement a dedicated remote deployment profile.
     response.set_cookie(auth.SESSION_COOKIE, token, httponly=True, samesite="strict",
-                        secure=False, path="/", max_age=auth.SESSION_SECONDS)
+                        secure=tls_policy.deployment_mode() == "direct-tls",
+                        path="/", max_age=auth.SESSION_SECONDS)
     return {"authenticated": True, "username": principal["username"],
             "role": principal["role"], "csrf_token": csrf,
             "mode": auth.mode(), "workspace_id": principal.get("workspace_id")}
