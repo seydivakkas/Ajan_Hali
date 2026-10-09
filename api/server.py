@@ -129,9 +129,15 @@ def auth_session(request: Request):
 def auth_login(credentials: auth.LoginPayload, response: Response):
     if auth.mode() != "session":
         raise HTTPException(409, "Yerel oturum doğrulaması etkin değil.")
+    retry_after = auth.login_retry_after(credentials.username)
+    if retry_after:
+        raise HTTPException(429, "Çok fazla hatalı giriş. Daha sonra tekrar deneyin.",
+                            headers={"Retry-After": str(retry_after)})
     principal = auth.authenticate(credentials.username, credentials.password)
     if not principal:
+        auth.record_failed_login(credentials.username)
         raise HTTPException(401, "Kullanıcı adı veya parola hatalı.")
+    auth.clear_login_failures(credentials.username)
     token, csrf = auth.new_session(principal)
     # Only loopback HTTP is supported. Before TLS-backed remote deployment,
     # enable Secure and implement a dedicated remote deployment profile.
