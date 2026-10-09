@@ -87,6 +87,8 @@ def list_records(job_dir: Path, *, verify_files: bool = True) -> list[EvidenceRe
     folder = _folder(job_dir)
     if not folder.exists():
         return []
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError("Evidence directory must be a real directory.")
     records = []
     paths = sorted(folder.glob("*.json"))
     if len(paths) > MAX_RECORDS_PER_JOB:
@@ -135,6 +137,8 @@ def record_evidence(job_dir: Path, submission: EvidenceSubmission, content: byte
             raise ValueError("Maximum 100 evidence documents per job.")
         folder = _folder(job_dir)
         folder.mkdir(parents=True, exist_ok=True)
+        if folder.is_symlink():
+            raise ValueError("Evidence directory may not be a symlink.")
         blob_path = folder / (record.evidence_id + ".blob")
         manifest_path = folder / (record.evidence_id + ".json")
         try:
