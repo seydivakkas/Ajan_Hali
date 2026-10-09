@@ -143,6 +143,39 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual(missing.status_code, 422)
             self.assertEqual(client.get("/api/v1/jobs/PREFLIGHT_CASE/evidence/"+"."*32+"/download").status_code, 409)
 
+    def test_vendor_document_does_not_clearly_production(self):
+        submission = ledger.EvidenceSubmission.model_validate(metadata(
+            kind="CAM_VENDOR_REPORT", color_observation=None))
+        record = ledger.record_evidence(self.job, submission, b"vendor claim",
+            real_report_sha256=HASH, studio_grid_sha256=None, submitted_by="tester")
+        result = evaluate_preflight(self.example, HASH,
+            evidence_records=[record.model_dump(mode="json")])
+        self.assertFalse(result.approved)
+        self.assertEqual(result.gate, "REVIEW_REQUIRED")
+        self.assertEqual(next(c for c in result.checks if c.id == "cam_format").status,
+                         "NOT_VERIFIED")
+
+    def test_api_rejects_corrupted_file_before_preflight(self):
+        record = ledger.record_evidence(self.job,
+            ledger.EvidenceSubmission.model_validate(metadata()), b"source",
+            real_report_sha256=HASH, studio_grid_sha256=None, submitted_by="tester")
+        _, file_path = ledger.find_record(self.job, record.evidence_id)
+        file_path.write_bytes(b"tampered")
+        with patch("api.server.OUTPUT_DIR", str(self.root)), \\
+             patch("api.server.get_job", return_value=self.example):
+            with TestClient(app) as client:
+                self.assertEqual(client.get("/api/v1/jobs/PREFLIGHT_CASE/preflight").status_code, 409)
+
+    def test_job_report_identity_is_verified(self):
+        from types import SimpleNamespace
+        with patch("api.server.OUTPUT_DIR", str(self.root)), \\
+             patch("api.server.AnalysisPipelineResult.model_validate_json",
+                   return_value=SimpleNamespace(job_id="OTHER_JOB",
+                       data_source="USER_FACTORY_INPUT")):
+            with TestClient(app) as client:
+                result = client.get("/api/v1/jobs/PREFLIGHT_CASE")
+                self.assertEqual(result.status_code, 409, result.text)
+
     def test_session_role_authorization(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
