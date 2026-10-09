@@ -198,8 +198,12 @@ class WorkspaceIsolationTests(unittest.TestCase):
             except (OSError, NotImplementedError):
                 self.skipTest("Symlink creation unavailable.")
             with patch.object(auth, "WORKSPACE_ROOT", fake_root):
-                with self.assertRaisesRegex(RuntimeError, "symbolic link"):
-                    auth.workspace_directory()  # no context should fail first
+                token = auth.set_workspace_context("alpha_co")
+                try:
+                    with self.assertRaisesRegex(RuntimeError, "symbolic link"):
+                        auth.workspace_directory()
+                finally:
+                    auth.clear_workspace_context(token)
 
     def test_workspace_root_fails_closed_without_context(self):
         with self.assertRaisesRegex(RuntimeError, "No authenticated workspace"):
