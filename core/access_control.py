@@ -166,6 +166,8 @@ def end_session(raw_token: str | None) -> None:
 
 
 def role_allows(role: str, method: str, path: str) -> bool:
+    if method == "GET" and path == "/api/v1/auth/session":
+        return True
     if role == "ADMIN":
         return True
     if method in {"GET", "HEAD"}:
