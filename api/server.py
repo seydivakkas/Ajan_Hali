@@ -12,13 +12,14 @@ from pydantic import ValidationError, BaseModel, Field
 from typing import Literal
 import sqlite3
 import hashlib
+import logging
 from datetime import datetime, timezone
 import uuid
 from starlette.concurrency import run_in_threadpool
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.models import LoomConfig, ImagePreprocessingParams, AnalysisPipelineResult
@@ -33,13 +34,31 @@ app = FastAPI(
     description="End-to-end Computer Vision, CIEDE2000 Color Matching, CAD DXF & Loom CAM Engine"
 )
 
+# This application is intended for loopback-only use until authentication exists.
+# CORS alone cannot prevent cross-site form submissions, so also reject requests
+# that carry an untrusted browser Origin (including mutations).
+TRUSTED_BROWSER_ORIGINS = (
+    "http://127.0.0.1:8001",
+    "http://localhost:8001",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=TRUSTED_BROWSER_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def enforce_local_browser_origin(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in TRUSTED_BROWSER_ORIGINS:
+        return JSONResponse(status_code=403, content={"detail": "Bu yerel API başka bir web kökeninden kullanılamaz."})
+    return await call_next(request)
 
 # Output directory setup
 OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "output"))
@@ -442,8 +461,9 @@ async def analyze_carpet_photo(
         raise
     except ValidationError as e:
         raise HTTPException(422, detail="; ".join(error["msg"] for error in e.errors()))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logging.exception('Unexpected carpet analysis failure')
+        raise HTTPException(status_code=500, detail='Analiz sırasında beklenmeyen bir sunucu hatası oluştu.')
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
