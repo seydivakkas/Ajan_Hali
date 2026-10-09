@@ -150,7 +150,7 @@ def auth_session(request: Request):
 
 @app.post("/api/v1/auth/login")
 def auth_login(credentials: auth.LoginPayload, response: Response):
-    if auth.mode() != "session":
+    if auth.mode() == "local":
         raise HTTPException(409, "Yerel oturum doğrulaması etkin değil.")
     retry_after = auth.login_retry_after(credentials.username)
     if retry_after:
