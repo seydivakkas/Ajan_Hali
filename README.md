@@ -105,6 +105,53 @@ Fiyat, stok ve bobin alanlarını istediğiniz zaman değiştirebilirsiniz. Ayar
 - Son 100 kaynak kayıtlı analizi açma. Raporlarda şirket ayar revizyonu, palet/fiyat/stok kopyası, üretim parametreleri ve kaynak fotoğraf saklanır.
 - Yerel desinatör inceleme günlüğü: isim, karar, not, tarih ve rapor SHA-256 izi SQLite içinde saklanır. İsim beyana dayanır; kimliği doğrulanmış imza veya üretim izni değildir.
 
+## Ölçüm/üretim kanıt dosyaları (P0-3, kayıt aşaması)
+
+`GET /api/v1/jobs/{job_id}/preflight` yanıtındaki `source_report_sha256`
+değeri ile analiz kaynağına bağlı kayıt oluşturulur. Düzenlenmiş taslak için
+`?studio_revision=N` sorgusundaki `studio_grid_sha256` de gereklidir.
+`POST /api/v1/jobs/{job_id}/evidence` uç noktası `multipart/form-data`
+içinde `file` (en çok 5 MB) ve JSON metni olarak `metadata` bekler.
+
+Örnek *bağlayıcı üstveri* (yer tutucu SHA değerleri gerçek preflight
+yanıtından alınmalıdır; bu örnek doğrulanmış bir firma ölçümü değildir):
+
+```json
+{
+  "expected_report_sha256": "<preflight source_report_sha256>",
+  "kind": "COLOR_LAB_SAMPLE",
+  "source_reference": "Cihaz laboratuvar dosyası / numune no",
+  "note": "Orijinal ölçüm dosyası ve operatör kaydı",
+  "color_observation": {
+    "target_lab": [50.0, 2.6772, -79.7751],
+    "sample_lab": [50.0, 0.0, -82.7485],
+    "illuminant": "D65",
+    "observer": "2",
+    "device": "Cihaz/seri numarası",
+    "dye_lot": "LOT-1",
+    "yarn_code": "YRN-01",
+    "measured_on": "2026-10-09",
+    "declared_max_delta_e00": 3.0
+  }
+}
+```
+
+`COLOR_LAB_SAMPLE` için tüm ölçüm alanları zorunludur. Diğer kanıt
+kategorileri: `YARN_LOT`, `CAM_VENDOR_REPORT`, `LOOM_PROFILE`,
+`CALIBRATION` ve `REPEAT_TEST`. Yüklenen dosyalar rastgele kimlikle
+saklanır, SHA-256 ile bütünlük kontrolü yapılır ve yalnız ek dosya
+(attachment) olarak indirilebilir; istenmeyen bir web sayfası gibi
+çalıştırılmaz. Meta verinin veya dosyanın değiştirilmesi bütünlük
+kontrolünde reddedilir (HTTP 409). Sonraki desen revizyonları önceki
+revizyonun kanıtlarını devralmaz.
+
+**Önemli:** Dosya yüklemek bir kaynağın gerçekliğini, cihaz ölçüm
+koşullarını, üretici uyumluluğunu veya firma yetkili onayını doğrulamaz.
+Sistem tüm bu kayıtları `RECORDED_NOT_INDEPENDENTLY_VERIFIED` olarak
+tutar. ΔE00 çiftleri hesaplanır; beyan edilen sınır aşıldığında FAIL
+üretilebilir ancak sınır içinde kalmak PASS veya APPROVED sağlamaz.
+Bu aşamada bağımsız ölçüm/doğrulama ve onay kanıt zinciri halen açıktır.
+
 ## Maliyet ve veri kapsamı
 
 İplik başına düğüm sayısı gerçek yeniden örneklenmiş matristen gelir:
