@@ -93,6 +93,8 @@ def create_user(username: str, password: str, role: Role) -> None:
         with db:
             db.execute("INSERT INTO users (username,salt,password_hash,role) VALUES (?,?,?,?)",
                        (username, salt, digest, role))
+    except sqlite3.IntegrityError as error:
+        raise ValueError("User already exists.") from error
     finally:
         db.close()
 
