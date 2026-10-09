@@ -1,3 +1,4 @@
+import { apiFetch } from './auth';
 export interface SupplierProduct {
   id: string; supplier: string; product_code: string; material: string;
   count_value: number; count_unit: 'dtex' | 'tex' | 'denier' | 'Nm';
@@ -18,11 +19,11 @@ async function read(res: Response): Promise<SupplierCatalog> {
     : body.detail || 'Katalog işlemi başarısız.');
   return body;
 }
-export async function fetchCatalog() { return read(await fetch(`${base}/api/v1/catalog`)); }
+export async function fetchCatalog() { return read(await apiFetch(`${base}/api/v1/catalog`)); }
 export async function addCatalog(records: { products?: Omit<SupplierProduct, 'dtex'>[]; colors?: MeasuredColor[] }) {
-  return read(await fetch(`${base}/api/v1/catalog`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(records) }));
+  return read(await apiFetch(`${base}/api/v1/catalog`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(records) }));
 }
 export async function importCatalog(file: File) {
   const form = new FormData(); form.append('file', file);
-  return read(await fetch(`${base}/api/v1/catalog/import`, {method:'POST', body:form}));
+  return read(await apiFetch(`${base}/api/v1/catalog/import`, {method:'POST', body:form}));
 }
