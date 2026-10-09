@@ -135,11 +135,14 @@ def revisions(directory):
 
 def read_revision(directory, revision):
     with connection(directory) as db:
-        row=db.execute('SELECT payload FROM revisions WHERE revision=?',(revision,)).fetchone()
+        row=db.execute('SELECT payload, sha256 FROM revisions WHERE revision=?',(revision,)).fetchone()
     db.close()
     if row is None:
         raise ValueError('Revizyon bulunamadı.')
-    return json.loads(zlib.decompress(row['payload']))
+    raw = zlib.decompress(row['payload'])
+    if hashlib.sha256(raw).hexdigest() != row['sha256']:
+        raise ValueError('Stüdyo revizyonunun bütünlük doğrulaması başarısız.')
+    return json.loads(raw)
 
 
 def save_revision(directory, report, request):
