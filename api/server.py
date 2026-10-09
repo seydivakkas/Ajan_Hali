@@ -283,6 +283,8 @@ def get_job(job_id: str):
         raise HTTPException(404, "Analiz bulunamadı")
     try:
         report = AnalysisPipelineResult.model_validate_json(path.read_text(encoding="utf-8"))
+        if report.job_id != job_id:
+            raise HTTPException(409, "Kaynak rapor kimliği istenen analizle uyuşmuyor.")
         if report.data_source not in {"USER_FACTORY_INPUT", "DEMO_SYNTHETIC"}:
             raise HTTPException(410, "Şirket kaynağı doğrulanmamış eski analiz erişime kapalı.")
         return report
