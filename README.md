@@ -2,7 +2,25 @@
 
 [![License: All Rights Reserved](https://img.shields.io/badge/license-All%20Rights%20Reserved-red?style=flat-square)](LICENSE)
 
-React/Tailwind stüdyosu ve FastAPI görüntü işleme motoru. Çalışan uygulama **demo palet, örnek stok/fiyat veya sentetik fotoğraf kullanmaz**. Şirket değerleri bilinmiyorsa kullanıcıdan istenir.
+React/Tailwind stüdyosu ve FastAPI görüntü işleme motoru. **Yeni kurulum boş fabrika envanteriyle başlar**; demo palet ve sentetik stok/fiyat yalnız açık kullanıcı isteğiyle yüklenir ve DEMO olarak etiketlenir. Şirket değerleri bilinmiyorsa kullanıcıdan istenir.
+
+## Kurulum (Windows / Python 3.11 ve Node.js 22)
+
+Proje kökünde PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
+.\\.venv\\Scripts\\python.exe -m uvicorn api.server:app --host 127.0.0.1 --port 8001
+```
+
+Tarayıcıda `http://127.0.0.1:8001` açılır. İsteğe bağlı FastSAM modeli için uygun PyTorch kurulumu ardından `pip install ultralytics` gerekir; bu paket olmadan segmentasyonun diğer yöntemleri kullanılabilir. Ayrı React geliştirme sunucusu için backend çalışırken `cd frontend; npm run dev` kullanın: `/api` ve `/static` istekleri 8001 portuna yönlenir.
+
+**Güvenlik sınırı:** API halen kullanıcı kimlik doğrulaması içermez. Yalnız `127.0.0.1` üzerinde çalıştırın; ağ/İnternet erişimine açmayın. Tarayıcı kökeni kısıtlaması kullanıcı kimlik doğrulamasının yerine geçmez. `factory_settings.json` ve `supplier_catalog.json` yerel çalışma verileridir, Git'e eklenmez. Daha önce bu dosyaları özelleştirdiyseniz güncelleme yapmadan önce yedekleyin.
 
 ## Başlatma
 
@@ -79,7 +97,7 @@ Komut sentetik fotoğraf üretmez. `loom_config` nesnesindeki tüm üretim param
 
 ## Doğrulama
 
-- `python -m unittest discover -s tests -v`
+- `python -m unittest discover -s tests -v` (GitHub Actions'ta da çalıştırılır)
 - `python -m compileall -q api core tests cli.py`
 - Frontend: `npm run build`
 
