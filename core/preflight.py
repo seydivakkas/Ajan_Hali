@@ -35,13 +35,15 @@ class PreflightResult(BaseModel):
     checked_at: str
     rule_version: str = RULE_VERSION
     checks: list[PreflightCheck]
+    recorded_evidence: list[dict[str, Any]] = Field(default_factory=list)
     gate: GateStatus
     approved: bool = False
     approval_id: None = None
 
 
 def evaluate_preflight(report, report_sha256: str, *, studio_revision: int | None = None,
-                       studio_evaluation: dict[str, Any] | None = None) -> PreflightResult:
+                       studio_evaluation: dict[str, Any] | None = None,
+                       evidence_records: list[dict[str, Any]] | None = None) -> PreflightResult:
     """Evaluate immutable analysis or studio-revision metadata.
 
     The caller must obtain the report and digest from disk, not the request body.
@@ -118,6 +120,28 @@ def evaluate_preflight(report, report_sha256: str, *, studio_revision: int | Non
          if effective_recipe else "No recorded consumption evidence."),
         shortages=shortages, live_erp_verified=False)
 
+    # Uploaded files/observations are user-supplied records. The system can
+    # compute incompatibilities, but never converts a recorded assertion to PASS.
+    recorded = evidence_records or []
+    observed_pairs = []
+    for entry in recorded:
+        observation = entry.get("color_observation")
+        if entry.get("kind") != "COLOR_LAB_SAMPLE" or not observation:
+            continue
+        from core.color_quantizer import ciede2000_single
+        import numpy as np
+        measured_delta = float(ciede2000_single(np.asarray(observation["target_lab"]),
+                                                np.asarray(observation["sample_lab"])))
+        observed_pairs.append({
+            "evidence_id": entry["evidence_id"], "yarn_code": observation["yarn_code"],
+            "dye_lot": observation["dye_lot"],
+            "delta_e00": round(measured_delta, 4),
+            "declared_max_delta_e00": observation["declared_max_delta_e00"],
+            "illuminant": observation["illuminant"], "observer": observation["observer"],
+            "conditions_compatible": observation["illuminant"] == "D65" and observation["observer"] == "2",
+            "within_declared_limit": measured_delta <= observation["declared_max_delta_e00"],
+            "independently_verified": False,
+        })
     conditions = []
     for yarn in palette:
         measured = yarn.get("catalog_snapshot") or {}
@@ -127,11 +151,15 @@ def evaluate_preflight(report, report_sha256: str, *, studio_revision: int | Non
                                "illuminant": color.get("illuminant"),
                                "observer": color.get("observer")})
     incompatible = [c for c in conditions if c["illuminant"] != "D65" or str(c["observer"]) != "2"]
-    add("color_measurement", "FAIL" if incompatible else "NOT_VERIFIED",
+    observed_failures = [p for p in observed_pairs if not p["conditions_compatible"] or
+                         not p["within_declared_limit"]]
+    add("color_measurement", "FAIL" if incompatible or observed_failures else "NOT_VERIFIED",
         "Colour measurement and target/sample Delta E",
         "Recorded measurement conditions contradict the comparison engine."
-        if incompatible else "No traceable, post-design target/sample measurement and colour tolerance evidence.",
+        if incompatible else ("Recorded sample exceeds declared tolerance or has incompatible measurement conditions."
+                              if observed_failures else "Recorded measurements are not independently verified."),
         catalog_conditions=conditions, incompatible_conditions=incompatible,
+        recorded_color_pairs=observed_pairs, violating_pairs=observed_failures,
         photo_estimate_is_physical_measurement=False)
 
     add("lot_traceability", "NOT_VERIFIED", "Yarn lot traceability",
@@ -152,6 +180,12 @@ def evaluate_preflight(report, report_sha256: str, *, studio_revision: int | Non
     add("operator_approval", "NOT_VERIFIED", "Authorized production release",
         "No cryptographically bound authorized operator approval for this source.")
 
+    # Evidence presence must not turn any NOT_VERIFIED check into PASS.
+    recorded_summary = [dict(evidence_id=e["evidence_id"], kind=e["kind"],
+                             source_reference=e["source_reference"], file_sha256=e["file_sha256"],
+                             submitted_by=e["submitted_by"], verification=e["verification"])
+                        for e in recorded]
+
     # A PASS in some metadata-only checks is never an overall approval.
     gate: GateStatus = "BLOCKED" if any(c.status == "FAIL" for c in checks) else "REVIEW_REQUIRED"
     return PreflightResult(
@@ -159,5 +193,5 @@ def evaluate_preflight(report, report_sha256: str, *, studio_revision: int | Non
         source_revision=report.factory_settings_revision,
         studio_revision=studio_revision,
         studio_grid_sha256=studio_evaluation.get("grid_sha256") if studio_evaluation else None,
-        checked_at=now, checks=checks, gate=gate,
+        checked_at=now, checks=checks, recorded_evidence=recorded_summary, gate=gate,
     )
