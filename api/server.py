@@ -12,12 +12,13 @@ from pydantic import ValidationError, BaseModel, Field
 from typing import Literal
 import sqlite3
 import hashlib
+import secrets
 import logging
 from datetime import datetime, timezone
 import uuid
 from starlette.concurrency import run_in_threadpool
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, Query
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,6 +29,7 @@ from core.factory_settings import FactorySettings, load_settings, save_settings
 from core.demo_data import change_demo_inventory, mark_demo_result
 from core.supplier_catalog import SupplierCatalog, append_catalog, catalog_view, validate_matching_conditions
 from core.preflight import PreflightResult, evaluate_preflight
+from core import access_control as auth
 
 app = FastAPI(
     title="Industrial Carpet AI: Competitor Photo to CAD & Yarn Recipe API",
@@ -35,7 +37,7 @@ app = FastAPI(
     description="End-to-end Computer Vision, CIEDE2000 Color Matching, CAD DXF & Loom CAM Engine"
 )
 
-# This application is intended for loopback-only use until authentication exists.
+# The service remains loopback-only; opt-in local session auth is not remote deployment.
 # CORS alone cannot prevent cross-site form submissions, so also reject requests
 # that carry an untrusted browser Origin (including mutations).
 TRUSTED_BROWSER_ORIGINS = (
@@ -48,9 +50,9 @@ TRUSTED_BROWSER_ORIGINS = (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=TRUSTED_BROWSER_ORIGINS,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-CSRF-Token"],
 )
 
 
@@ -60,6 +62,39 @@ async def enforce_local_browser_origin(request: Request, call_next):
     if origin is not None and origin not in TRUSTED_BROWSER_ORIGINS:
         return JSONResponse(status_code=403, content={"detail": "Bu yerel API başka bir web kökeninden kullanılamaz."})
     return await call_next(request)
+
+
+@app.middleware("http")
+async def protect_local_data(request: Request, call_next):
+    # Network peer and Host both matter: Host filtering defends DNS rebinding,
+    # the peer check defends accidental --host 0.0.0.0 exposure.
+    if not auth.is_loopback_client(request.client.host if request.client else None):
+        return JSONResponse(status_code=403, content={"detail": "API yalnızca yerel bilgisayarda kullanılabilir."})
+    if not auth.is_local_host_header(request.headers.get("host", "")):
+        return JSONResponse(status_code=403, content={"detail": "Güvenilmeyen Host başlığı."})
+
+    if auth.mode() == "local":
+        return await call_next(request)
+
+    path = request.url.path
+    if request.method == "OPTIONS" or path in {"/", "/api/v1/health", "/api/v1/auth/login",
+                                               "/openapi.json", "/docs", "/redoc"} or path.startswith("/assets/"):
+        return await call_next(request)
+
+    principal = auth.resolve_session(request.cookies.get(auth.SESSION_COOKIE))
+    if principal is None:
+        return JSONResponse(status_code=401, content={"detail": "Oturum açılması gerekiyor."})
+    request.state.principal = principal
+
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        csrf = request.headers.get("X-CSRF-Token", "")
+        if not csrf or not secrets.compare_digest(csrf, principal["csrf_token"]):
+            return JSONResponse(status_code=403, content={"detail": "CSRF doğrulaması başarısız."})
+
+    if path != "/api/v1/auth/logout" and not auth.role_allows(principal["role"], request.method, path):
+        return JSONResponse(status_code=403, content={"detail": "Bu işlem için yetki yok."})
+    return await call_next(request)
+
 
 # Output directory setup
 OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "output"))
@@ -77,6 +112,40 @@ def health_check():
         "engine": "Carpet CAD & Yarn Recipe Optimizer v1.0",
         "license": "All Rights Reserved - Seydi Eryılmaz (@seydivakkas)"
     }
+
+
+@app.get("/api/v1/auth/session")
+def auth_session(request: Request):
+    if auth.mode() == "local":
+        return {"authenticated": True, "username": "local", "role": "ADMIN",
+                "csrf_token": None, "mode": "local"}
+    principal = request.state.principal
+    return {"authenticated": True, "username": principal["username"],
+            "role": principal["role"], "csrf_token": principal["csrf_token"],
+            "mode": "session"}
+
+
+@app.post("/api/v1/auth/login")
+def auth_login(credentials: auth.LoginPayload, response: Response):
+    if auth.mode() != "session":
+        raise HTTPException(409, "Yerel oturum doğrulaması etkin değil.")
+    principal = auth.authenticate(credentials.username, credentials.password)
+    if not principal:
+        raise HTTPException(401, "Kullanıcı adı veya parola hatalı.")
+    token, csrf = auth.new_session(principal)
+    # Only loopback HTTP is supported. Before TLS-backed remote deployment,
+    # enable Secure and implement a dedicated remote deployment profile.
+    response.set_cookie(auth.SESSION_COOKIE, token, httponly=True, samesite="strict",
+                        secure=False, path="/", max_age=auth.SESSION_SECONDS)
+    return {"authenticated": True, "username": principal["username"],
+            "role": principal["role"], "csrf_token": csrf, "mode": "session"}
+
+
+@app.post("/api/v1/auth/logout")
+def auth_logout(request: Request, response: Response):
+    auth.end_session(request.cookies.get(auth.SESSION_COOKIE))
+    response.delete_cookie(auth.SESSION_COOKIE, path="/", httponly=True, samesite="strict")
+    return {"authenticated": False}
 
 
 @app.get("/api/v1/palette")
