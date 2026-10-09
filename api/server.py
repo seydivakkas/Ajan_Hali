@@ -29,6 +29,7 @@ from core.factory_settings import FactorySettings, load_settings, save_settings
 from core.demo_data import change_demo_inventory, mark_demo_result
 from core.supplier_catalog import SupplierCatalog, append_catalog, catalog_view, validate_matching_conditions
 from core.preflight import PreflightResult, evaluate_preflight
+from core import evidence_registry as evidence
 from core import access_control as auth
 
 app = FastAPI(
@@ -582,6 +583,78 @@ def get_studio_revision(job_id: str, revision: int):
         raise HTTPException(404,str(error))
 
 
+@app.post('/api/v1/jobs/{job_id}/evidence', status_code=201, response_model=evidence.EvidenceRecord)
+async def upload_job_evidence(job_id: str, request: Request, file: UploadFile = File(...),
+                              metadata: str = Form(...)):
+    """Record a source file and measurements, WITHOUT declaring them independently verified."""
+    report = get_job(job_id)
+    if len(metadata) > 32768:
+        raise HTTPException(413, 'Kanıt üstverisi en fazla 32 KB olabilir.')
+    try:
+        submission = evidence.EvidenceSubmission.model_validate_json(metadata)
+    except ValueError as error:
+        raise HTTPException(422, str(error))
+    ext = Path((file.filename or '').replace('\\', '/')).suffix.lower()
+    if ext not in {'.pdf', '.png', '.jpg', '.jpeg', '.cxf', '.qtx', '.xml', '.txt'}:
+        raise HTTPException(415, 'Yalnızca PDF, JPG, PNG, CXF, QTX, XML veya TXT kanıtı yükleyin.')
+    data = await file.read(evidence.MAX_EVIDENCE_BYTES + 1)
+    if not data or len(data) > evidence.MAX_EVIDENCE_BYTES:
+        raise HTTPException(413, 'Kanıt dosyası 1 bayt ile 5 MB arasında olmalıdır.')
+
+    job_dir = job_directory(job_id)
+    report_digest = hashlib.sha256((job_dir / 'analysis_report.json').read_bytes()).hexdigest()
+    studio_digest = None
+    if submission.studio_revision is not None:
+        from core import designer_studio as studio
+        try:
+            saved = studio.read_revision(job_dir, submission.studio_revision)
+        except ValueError as error:
+            raise HTTPException(409, str(error))
+        if saved.get('job_id') != job_id or saved.get('revision') != submission.studio_revision:
+            raise HTTPException(409, 'Stüdyo revizyonu bu analize ait değil.')
+        studio_digest = saved['evaluation']['grid_sha256']
+
+    if submission.color_observation and submission.color_observation.yarn_code not in {
+            p.get('code') for p in report.palette_snapshot}:
+        raise HTTPException(422, 'Ölçülen iplik kodu bu analizde bulunmuyor.')
+
+    username = getattr(getattr(request.state, 'principal', None), 'username', None)
+    if auth.mode() == 'session':
+        username = request.state.principal['username']
+    else:
+        username = 'LOCAL_UNAUTHENTICATED'
+
+    try:
+        return evidence.record_evidence(job_dir, submission, data,
+            real_report_sha256=report_digest, studio_grid_sha256=studio_digest,
+            submitted_by=username)
+    except ValueError as error:
+        raise HTTPException(409, str(error))
+
+
+@app.get('/api/v1/jobs/{job_id}/evidence', response_model=list[evidence.EvidenceRecord])
+def list_job_evidence(job_id: str):
+    get_job(job_id)
+    try:
+        return evidence.list_records(job_directory(job_id))
+    except ValueError as error:
+        raise HTTPException(409, str(error))
+
+
+@app.get('/api/v1/jobs/{job_id}/evidence/{evidence_id}/download')
+def download_job_evidence(job_id: str, evidence_id: str):
+    get_job(job_id)
+    try:
+        record, path = evidence.find_record(job_directory(job_id), evidence_id)
+    except FileNotFoundError:
+        raise HTTPException(404, 'Kanıt kaydı bulunamadı.')
+    except ValueError as error:
+        raise HTTPException(409, str(error))
+    return FileResponse(path, filename=record.evidence_id + '.bin',
+                        media_type='application/octet-stream',
+                        headers={'X-Content-Type-Options': 'nosniff'})
+
+
 @app.get('/api/v1/jobs/{job_id}/preflight', response_model=PreflightResult)
 def get_production_preflight(job_id: str, studio_revision: int | None = Query(default=None, ge=1)):
     """Evidence report for an immutable analysis or a saved studio revision.
@@ -601,8 +674,15 @@ def get_production_preflight(job_id: str, studio_revision: int | None = Query(de
         if saved.get('job_id') != job_id or saved.get('revision') != studio_revision:
             raise HTTPException(409, 'Stüdyo revizyonu analizle uyuşmuyor.')
         evaluation = saved['evaluation']
+    try:
+        matched = evidence.records_for_scope(evidence.list_records(job_directory(job_id)),
+                         report_sha, studio_revision,
+                         evaluation.get('grid_sha256') if evaluation else None)
+    except ValueError as error:
+        raise HTTPException(409, str(error))
     return evaluate_preflight(report, report_sha,
-                              studio_revision=studio_revision, studio_evaluation=evaluation)
+                              studio_revision=studio_revision, studio_evaluation=evaluation,
+                              evidence_records=[r.model_dump(mode='json') for r in matched])
 
 
 # Mount frontend dist if built
