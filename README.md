@@ -65,6 +65,66 @@ yönetimi ve ayrıntılı nesne düzeyi yetkiler henüz yoktur. 0.0.0.0/LAN/İnt
 üzerine yayınlamak yasaktır; `session` modu bunları güvenli kılmaz. Bu çalışmalar
 Issue #2 kapsamında açık kalır.
 
+## Firma bazlı çalışma alanları — P0 izolasyon betası
+
+`AJAN_HALI_AUTH_MODE=workspace` ayrı bir **yerel çalışma modudur**. Her
+kullanıcının tek bir firma kimliği, rolü ve sunucu tarafı oturumu vardır.
+Her işlemde firma kimliği **oturumdaki sunucu kaydından** türetilir;
+`workspace_id` URL, başlık veya form ile seçilmez. Tüm firmaların kullanıcı
+adları şimdilik tek merkezi kayıt tablosunda benzersizdir.
+
+PowerShell'de, proje kökünden:
+
+```powershell
+$env:AJAN_HALI_AUTH_MODE = "workspace"
+
+python -m core.access_control add-workspace alfa_tekstil "Alfa Tekstil"
+python -m core.access_control add-workspace beta_hali "Beta Halı"
+
+python -m core.access_control add-user alfa_yonetici --role ADMIN --workspace alfa_tekstil
+python -m core.access_control add-user beta_yonetici --role ADMIN --workspace beta_hali
+
+python -m uvicorn api.server:app --host 127.0.0.1 --port 8001
+```
+
+Her firma için varsayılan dosya düzeni:
+
+```text
+output/
+  auth.sqlite3                       # ortak kullanıcı/oturum kimlik deposu
+  workspaces/
+    alfa_tekstil/
+      factory_settings.json          # firma fiyatı, stok, tezgâh ayarı
+      supplier_catalog.json          # firma katalog ve ölçüm lotları
+      jobs/
+        reviews.sqlite3              # firma incelemeleri
+        JOB-XXXXXXXX/
+          analysis_report.json
+          studio.sqlite3
+          evidence/
+          ...                        # firma görselleri ve prototip CAD dosyaları
+    beta_hali/                        # farklı firma için ayrı veriler
+```
+
+Aynı `JOB-...` kimliği iki firmada olsa da rapor, fotoğraf, desen,
+inceleme, kanıt, fiyat/stok ve katalog farklı dizinlerde okunur. Bir
+firmanın kullanıcıları diğer firmaya ait iş kimliğini tahmin ederek
+indirme, `/static` ya da `/preflight` üzerinden erişemez.
+
+**Eski veriler aktarılmaz:** `local`/`session` modundan kalma
+`factory_settings.json`, `supplier_catalog.json`, `output/JOB-...`
+ve eski (firmasız) kullanıcılar çalışma alanlarına otomatik taşınmaz.
+Eski kullanıcıyı firma hesabı olarak kullanmak için açıkça yeni kullanıcı
+oluşturun; veri aktarımı ayrıca yedekli, doğrulamalı ve kayıtlı bir
+migrasyon aracıyla yapılmalıdır. Modlar arasında rastgele geçiş yapmayın.
+
+**Kabul sınırı:** Bu paket test edilen uygulama API yollarında firma bazlı
+mantıksal/dosya izolasyonu sağlar. Ayrı OS hesapları, disk şifreleme,
+database row-level security, yetkili firma yönetimi web ekranı, TLS,
+uzaktan erişim, merkezi audit ve ağ katmanı saldırı koruması sağlamaz.
+`workspace` modu da **yalnızca `127.0.0.1` üzerinde** çalışmalıdır.
+Bu sürüm çok kiracılı İnternet SaaS'ı olarak yayınlanamaz.
+
 ## Başlatma
 
 `start_studio.bat` veya proje kökünde:

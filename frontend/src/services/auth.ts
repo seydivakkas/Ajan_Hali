@@ -1,7 +1,8 @@
 /** Cookie-based localhost API session. CSRF stays in JS memory, never localStorage. */
 export interface SessionInfo {
   authenticated: boolean;
-  mode: 'local' | 'session';
+  mode: 'local' | 'session' | 'workspace';
+  workspace_id?: string | null;
   username: string;
   role: 'ADMIN' | 'DESIGNER' | 'OPERATOR';
   csrf_token: string | null;

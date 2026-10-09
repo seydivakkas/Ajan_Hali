@@ -69,15 +69,15 @@ export async function uploadSpectroFile(file: File): Promise<any> {
 
 export function resolveImageUrl(path: string | undefined | null): string {
   if (!path) return '';
-  // Normalize Windows backslashes
-  const normalized = path.replace(/\\/g, '/');
-  // If it contains "output/", strip the leading parts before output
-  const outputIdx = normalized.indexOf('output/');
-  if (outputIdx !== -1) {
-    return `${API_BASE_URL}/static/${normalized.substring(outputIdx + 7)}`;
-  }
-  // Otherwise return as is
-  return `${API_BASE_URL}/${normalized}`;
+  // The server scopes /static requests to the authenticated company.
+  // Never include output/workspaces/<tenant> in the client URL: it isn't
+  // a security selector and legacy outputs have different root layouts.
+  const segments = path.replace(/\\/g, '/').split('/');
+  const fileName = segments[segments.length - 1];
+  const jobId = segments[segments.length - 2];
+  if (!jobId || !/^[A-Za-z0-9_-]{1,80}$/.test(jobId) ||
+      !/^[A-Za-z0-9_.-]{1,120}$/.test(fileName)) return '';
+  return `${API_BASE_URL}/static/${encodeURIComponent(jobId)}/${encodeURIComponent(fileName)}`;
 }
 
 export interface JobSummary {

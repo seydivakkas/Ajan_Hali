@@ -16,12 +16,16 @@ import secrets
 import sqlite3
 import time
 from pathlib import Path
+from contextvars import ContextVar
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
 AUTH_DB_PATH = Path(__file__).resolve().parents[1] / "output" / "auth.sqlite3"
+WORKSPACE_ROOT = Path(__file__).resolve().parents[1] / "output" / "workspaces"
+_ACTIVE_WORKSPACE: ContextVar[str | None] = ContextVar("ajan_workspace", default=None)
+WORKSPACE_PATTERN = re.compile(r"[a-z][a-z0-9_-]{2,39}\Z")
 SESSION_SECONDS = 8 * 3600
 SESSION_COOKIE = "ajan_session"
 LOGIN_WINDOW_SECONDS = 15 * 60
@@ -36,8 +40,8 @@ class LoginPayload(BaseModel):
 
 def mode() -> str:
     configured = os.getenv("AJAN_HALI_AUTH_MODE", "local").lower().strip()
-    if configured not in {"local", "session"}:
-        raise RuntimeError("AJAN_HALI_AUTH_MODE must be local or session.")
+    if configured not in {"local", "session", "workspace"}:
+        raise RuntimeError("AJAN_HALI_AUTH_MODE must be local, session or workspace.")
     return configured
 
 
@@ -60,6 +64,11 @@ def connection() -> sqlite3.Connection:
     db = sqlite3.connect(AUTH_DB_PATH, timeout=15)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout = 15000")
+    db.execute("""CREATE TABLE IF NOT EXISTS workspaces (
+        workspace_id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1
+    )""")
     db.execute("""CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY COLLATE NOCASE,
         salt BLOB NOT NULL,
@@ -67,6 +76,9 @@ def connection() -> sqlite3.Connection:
         role TEXT NOT NULL CHECK(role IN ('ADMIN','DESIGNER','OPERATOR')),
         disabled INTEGER NOT NULL DEFAULT 0
     )""")
+    # Upgrade old single-device accounts without assigning them to a company.
+    if "workspace_id" not in {row["name"] for row in db.execute("PRAGMA table_info(users)")}:
+        db.execute("ALTER TABLE users ADD COLUMN workspace_id TEXT")
     db.execute("""CREATE TABLE IF NOT EXISTS sessions (
         token_sha256 TEXT PRIMARY KEY,
         username TEXT NOT NULL,
@@ -138,20 +150,77 @@ def _password_hash(password: str, salt: bytes) -> bytes:
     return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
 
 
-def create_user(username: str, password: str, role: Role) -> None:
+def create_workspace(workspace_id: str, display_name: str) -> None:
+    """Provision a company explicitly. Never auto-map legacy data or users."""
+    if not WORKSPACE_PATTERN.fullmatch(workspace_id):
+        raise ValueError("Workspace ID must be 3-40 lowercase letters, digits, _ or -, starting with a letter.")
+    if not 2 <= len(display_name.strip()) <= 150:
+        raise ValueError("Workspace name must contain 2-150 characters.")
+    db = connection()
+    try:
+        with db:
+            db.execute("INSERT INTO workspaces(workspace_id,display_name) VALUES (?,?)",
+                       (workspace_id, display_name.strip()))
+    except sqlite3.IntegrityError as error:
+        raise ValueError("Workspace already exists.") from error
+    finally:
+        db.close()
+
+
+def workspace_directory() -> Path:
+    """Get the exact authenticated company's folder; never resolve a client selector."""
+    if mode() != "workspace":
+        raise RuntimeError("Workspace storage requires workspace mode.")
+    workspace_id = _ACTIVE_WORKSPACE.get()
+    if not workspace_id or not WORKSPACE_PATTERN.fullmatch(workspace_id):
+        raise RuntimeError("No authenticated workspace context.")
+    root = WORKSPACE_ROOT
+    if root.is_symlink():
+        raise RuntimeError("Workspace root cannot be a symbolic link.")
+    root.mkdir(parents=True, exist_ok=True)
+    if root.is_symlink():
+        raise RuntimeError("Workspace root cannot be a symbolic link.")
+    directory = root / workspace_id
+    if directory.is_symlink():
+        raise RuntimeError("Workspace folder cannot be a symbolic link.")
+    directory.mkdir(parents=True, exist_ok=True)
+    if directory.is_symlink() or directory.resolve().parent != root.resolve():
+        raise RuntimeError("Invalid workspace storage path.")
+    return directory
+
+
+def set_workspace_context(workspace_id: str):
+    """Middleware-only binding. This is NOT an authorization API."""
+    if not WORKSPACE_PATTERN.fullmatch(workspace_id):
+        raise RuntimeError("Invalid workspace ID from authenticated session.")
+    return _ACTIVE_WORKSPACE.set(workspace_id)
+
+
+def clear_workspace_context(token) -> None:
+    _ACTIVE_WORKSPACE.reset(token)
+
+
+def create_user(username: str, password: str, role: Role,
+                workspace_id: str | None = None) -> None:
     if not re.fullmatch(r"[A-Za-z0-9_-]{3,64}", username):
         raise ValueError("Username must be 3–64 letters, digits, _ or -.")
     if len(password) < 12 or len(password) > 1024:
         raise ValueError("Password must have 12–1024 characters.")
     if role not in {"ADMIN", "DESIGNER", "OPERATOR"}:
         raise ValueError("Invalid role.")
+    if workspace_id is not None and not WORKSPACE_PATTERN.fullmatch(workspace_id):
+        raise ValueError("Invalid workspace ID.")
     salt = secrets.token_bytes(16)
     digest = _password_hash(password, salt)
     db = connection()
     try:
         with db:
-            db.execute("INSERT INTO users (username,salt,password_hash,role) VALUES (?,?,?,?)",
-                       (username, salt, digest, role))
+            if workspace_id is not None and db.execute(
+                    "SELECT 1 FROM workspaces WHERE workspace_id=? AND enabled=1",
+                    (workspace_id,)).fetchone() is None:
+                raise ValueError("Workspace not found or disabled.")
+            db.execute("INSERT INTO users (username,salt,password_hash,role,workspace_id) VALUES (?,?,?,?,?)",
+                       (username, salt, digest, role, workspace_id))
     except sqlite3.IntegrityError as error:
         raise ValueError("User already exists.") from error
     finally:
@@ -180,7 +249,23 @@ def authenticate(username: str, password: str) -> dict | None:
     expected = row["password_hash"] if row else b"\x00" * 32
     if not hmac.compare_digest(_password_hash(password, salt), expected) or row is None:
         return None
-    return {"username": row["username"], "role": row["role"]}
+    if mode() == "workspace":
+        if not row["workspace_id"] or not workspace_enabled(row["workspace_id"]):
+            return None
+    elif row["workspace_id"] is not None:
+        # A bound workspace account cannot fall back to the legacy global store.
+        return None
+    return {"username": row["username"], "role": row["role"],
+            "workspace_id": row["workspace_id"]}
+
+
+def workspace_enabled(workspace_id: str) -> bool:
+    db = connection()
+    try:
+        return db.execute("SELECT 1 FROM workspaces WHERE workspace_id=? AND enabled=1",
+                          (workspace_id,)).fetchone() is not None
+    finally:
+        db.close()
 
 
 def new_session(principal: dict) -> tuple[str, str]:
@@ -204,14 +289,20 @@ def resolve_session(raw_token: str | None) -> dict | None:
     digest = hashlib.sha256(raw_token.encode()).hexdigest()
     db = connection()
     try:
-        row = db.execute("""SELECT s.username, s.csrf_token, s.expires_at, u.role
+        row = db.execute("""SELECT s.username, s.csrf_token, s.expires_at, u.role, u.workspace_id
             FROM sessions s JOIN users u ON u.username=s.username
             WHERE s.token_sha256=? AND u.disabled=0""", (digest,)).fetchone()
     finally:
         db.close()
     if not row or row["expires_at"] <= int(time.time()):
         return None
-    return {"username": row["username"], "role": row["role"], "csrf_token": row["csrf_token"]}
+    if mode() == "workspace":
+        if not row["workspace_id"] or not workspace_enabled(row["workspace_id"]):
+            return None
+    elif row["workspace_id"] is not None:
+        return None
+    return {"username": row["username"], "role": row["role"],
+            "workspace_id": row["workspace_id"], "csrf_token": row["csrf_token"]}
 
 
 def end_session(raw_token: str | None) -> None:
@@ -246,21 +337,30 @@ def role_allows(role: str, method: str, path: str) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Manage localhost-only Studio users")
     sub = parser.add_subparsers(dest="action", required=True)
+    provision = sub.add_parser("add-workspace")
+    provision.add_argument("workspace_id")
+    provision.add_argument("display_name")
     add = sub.add_parser("add-user")
     add.add_argument("username")
+    add.add_argument("--workspace", dest="workspace_id")
     add.add_argument("--role", choices=("ADMIN", "DESIGNER", "OPERATOR"), required=True)
     disabled = sub.add_parser("disable-user")
     disabled.add_argument("username")
     args = parser.parse_args()
-    if args.action == "disable-user":
+    if args.action == "add-workspace":
+        create_workspace(args.workspace_id, args.display_name)
+        print(f"Workspace created: {args.workspace_id}")
+    elif args.action == "disable-user":
         disable_user(args.username)
         print("User disabled and sessions revoked.")
     else:
+        if mode() == "workspace" and not args.workspace_id:
+            parser.error("Workspace mode requires --workspace when creating users.")
         pw = getpass.getpass("Password (at least 12 characters): ")
         confirm = getpass.getpass("Confirm password: ")
         if pw != confirm:
             parser.error("Passwords do not match.")
-        create_user(args.username, pw, args.role)
+        create_user(args.username, pw, args.role, workspace_id=args.workspace_id)
         print(f"Created {args.role} user {args.username}.")
 
 

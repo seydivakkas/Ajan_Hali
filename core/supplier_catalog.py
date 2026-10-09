@@ -73,10 +73,18 @@ CATALOG_PATH = Path(__file__).resolve().parents[1] / 'supplier_catalog.json'
 _lock = threading.Lock()
 
 
+def active_catalog_path() -> Path:
+    from core import access_control as auth
+    if auth.mode() == 'workspace':
+        return auth.workspace_directory() / 'supplier_catalog.json'
+    return CATALOG_PATH
+
+
 def load_catalog():
-    if not CATALOG_PATH.exists():
+    path = active_catalog_path()
+    if not path.exists():
         return SupplierCatalog()
-    return SupplierCatalog.model_validate_json(CATALOG_PATH.read_text(encoding='utf-8'))
+    return SupplierCatalog.model_validate_json(path.read_text(encoding='utf-8'))
 
 
 def append_catalog(incoming: SupplierCatalog):
@@ -89,9 +97,10 @@ def append_catalog(incoming: SupplierCatalog):
         product_ids = {product.id for product in combined.products}
         if any(color.product_id not in product_ids for color in combined.colors):
             raise ValueError('Kartela kaydının product_id alanı mevcut bir ipliğe bağlanmalıdır.')
-        temporary = CATALOG_PATH.with_suffix('.tmp')
+        path = active_catalog_path()
+        temporary = path.with_suffix('.tmp')
         temporary.write_text(combined.model_dump_json(indent=2), encoding='utf-8')
-        os.replace(temporary, CATALOG_PATH)
+        os.replace(temporary, path)
         return combined
 
 

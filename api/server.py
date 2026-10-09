@@ -94,12 +94,34 @@ async def protect_local_data(request: Request, call_next):
 
     if path != "/api/v1/auth/logout" and not auth.role_allows(principal["role"], request.method, path):
         return JSONResponse(status_code=403, content={"detail": "Bu işlem için yetki yok."})
+    if auth.mode() == "workspace":
+        workspace_id = principal.get("workspace_id")
+        if not workspace_id:
+            return JSONResponse(status_code=403, content={"detail": "Firma alanı atanmamış."})
+        token = auth.set_workspace_context(workspace_id)
+        try:
+            return await call_next(request)
+        finally:
+            auth.clear_workspace_context(token)
     return await call_next(request)
 
 
 # Output directory setup
 OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "output"))
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def active_output_dir() -> Path:
+    """The request's data root, never selected from HTTP route/query/body."""
+    if auth.mode() == "workspace":
+        root = auth.workspace_directory() / "jobs"
+        if root.is_symlink():
+            raise RuntimeError("Workspace job directory cannot be a symlink.")
+        root.mkdir(parents=True, exist_ok=True)
+        if root.is_symlink():
+            raise RuntimeError("Workspace job directory cannot be a symlink.")
+        return root
+    return Path(OUTPUT_DIR)
 
 
 PALETTE_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "palette", "factory_palette.json"))
@@ -119,16 +141,16 @@ def health_check():
 def auth_session(request: Request):
     if auth.mode() == "local":
         return {"authenticated": True, "username": "local", "role": "ADMIN",
-                "csrf_token": None, "mode": "local"}
+                "csrf_token": None, "mode": "local", "workspace_id": None}
     principal = request.state.principal
     return {"authenticated": True, "username": principal["username"],
             "role": principal["role"], "csrf_token": principal["csrf_token"],
-            "mode": "session"}
+            "mode": auth.mode(), "workspace_id": principal.get("workspace_id")}
 
 
 @app.post("/api/v1/auth/login")
 def auth_login(credentials: auth.LoginPayload, response: Response):
-    if auth.mode() != "session":
+    if auth.mode() == "local":
         raise HTTPException(409, "Yerel oturum doğrulaması etkin değil.")
     retry_after = auth.login_retry_after(credentials.username)
     if retry_after:
@@ -145,7 +167,8 @@ def auth_login(credentials: auth.LoginPayload, response: Response):
     response.set_cookie(auth.SESSION_COOKIE, token, httponly=True, samesite="strict",
                         secure=False, path="/", max_age=auth.SESSION_SECONDS)
     return {"authenticated": True, "username": principal["username"],
-            "role": principal["role"], "csrf_token": csrf, "mode": "session"}
+            "role": principal["role"], "csrf_token": csrf,
+            "mode": auth.mode(), "workspace_id": principal.get("workspace_id")}
 
 
 @app.post("/api/v1/auth/logout")
@@ -201,7 +224,7 @@ def remove_demo_inventory(request: DemoChange):
 @app.delete('/api/v1/demo/jobs')
 def remove_demo_jobs():
     removed = 0
-    for path in Path(OUTPUT_DIR).glob('*/analysis_report.json'):
+    for path in active_output_dir().glob('*/analysis_report.json'):
         try:
             report = AnalysisPipelineResult.model_validate_json(path.read_text(encoding='utf-8'))
         except (ValueError, OSError):
@@ -250,7 +273,7 @@ async def import_supplier_catalog(file: UploadFile = File(...)):
 def job_directory(job_id: str) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", job_id):
         raise HTTPException(400, "Geçersiz analiz kimliği")
-    root = Path(OUTPUT_DIR).resolve()
+    root = active_output_dir().resolve()
     target = (root / job_id).resolve()
     if target.parent != root:
         raise HTTPException(400, "Geçersiz analiz yolu")
@@ -260,7 +283,7 @@ def job_directory(job_id: str) -> Path:
 @app.get("/api/v1/jobs")
 def list_jobs():
     items = []
-    for path in Path(OUTPUT_DIR).glob("*/analysis_report.json"):
+    for path in active_output_dir().glob("*/analysis_report.json"):
         try:
             report = AnalysisPipelineResult.model_validate_json(path.read_text(encoding="utf-8"))
             if report.data_source not in {"USER_FACTORY_INPUT", "DEMO_SYNTHETIC"}:
@@ -320,7 +343,7 @@ class DesignReview(BaseModel):
 
 
 def review_connection():
-    connection = sqlite3.connect(str(Path(OUTPUT_DIR) / "reviews.sqlite3"))
+    connection = sqlite3.connect(str(active_output_dir() / "reviews.sqlite3"))
     connection.row_factory = sqlite3.Row
     connection.execute("CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, job_id TEXT, created_at TEXT, reviewer TEXT, decision TEXT, note TEXT, report_sha256 TEXT)")
     return connection
@@ -520,7 +543,7 @@ async def analyze_carpet_photo(
             symmetry_mode=symmetry_mode
         )
 
-        worker = CarpetAnalysisPipeline(output_base_dir=OUTPUT_DIR, palette=[y.model_dump() for y in settings.yarns])
+        worker = CarpetAnalysisPipeline(output_base_dir=str(active_output_dir()), palette=[y.model_dump() for y in settings.yarns])
         result = await run_in_threadpool(
             worker.process,
             image_input=tmp_path,
@@ -621,7 +644,7 @@ async def upload_job_evidence(job_id: str, request: Request, file: UploadFile = 
         raise HTTPException(422, 'Ölçülen iplik kodu bu analizde bulunmuyor.')
 
     username = getattr(getattr(request.state, 'principal', None), 'username', None)
-    if auth.mode() == 'session':
+    if auth.mode() != 'local':
         username = request.state.principal['username']
     else:
         username = 'LOCAL_UNAUTHENTICATED'
