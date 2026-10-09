@@ -2,6 +2,7 @@
 CAD & Jacquard CAM Export Engine: DXF, SVG and Loom Instruction Matrix (.EP / .DAT / .TXT)
 """
 import os
+from html import escape
 import cv2
 import numpy as np
 from typing import List, Dict, Any, Tuple
@@ -150,7 +151,7 @@ def export_svg(
     for stat in color_stats:
         p_idx = stat["palette_index"]
         code = stat["palette_code"]
-        name = stat["yarn_name"]
+        name = escape(stat["yarn_name"], quote=True)
         rgb = stat["mapped_rgb"]
         rgb_hex = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
 
