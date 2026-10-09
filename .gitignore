@@ -32,6 +32,12 @@ ehthumbs.db
 *.swp
 *.swo
 
+# User-maintained factory and supplier records (never commit client data)
+factory_settings.json
+supplier_catalog.json
+factory_settings.tmp
+supplier_catalog.tmp
+
 # Logs & sqlite
 *.log
 *.sqlite3
