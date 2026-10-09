@@ -86,6 +86,41 @@ class LocalAuthTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/health", headers={"Origin": "https://bad.example"}).status_code, 403)
         self.assertEqual(self.client.get("/api/v1/health", headers={"Host": "127.0.0.1:8001"}).status_code, 200)
 
+    def test_login_throttling_survives_requests_and_expires(self):
+        for _ in range(auth.LOGIN_MAX_FAILURES):
+            self.assertEqual(self.login("admin1", "wrong").status_code, 401)
+        blocked = self.login("admin1", "strong-admin-pass-123")
+        self.assertEqual(blocked.status_code, 429)
+        self.assertGreater(int(blocked.headers["retry-after"]), 0)
+        # Rate-limit state survives a new TestClient, because it is SQLite-backed.
+        with TestClient(app) as new_client:
+            self.assertEqual(new_client.post("/api/v1/auth/login", json={
+                "username": "admin1", "password": "strong-admin-pass-123",
+            }).status_code, 429)
+        from unittest.mock import patch as mock_patch
+        import time
+        with mock_patch.object(auth.time, "time", return_value=time.time() + auth.LOGIN_WINDOW_SECONDS + 2):
+            success = self.login("admin1", "strong-admin-pass-123")
+            self.assertEqual(success.status_code, 200, success.text)
+
+    def test_unknown_user_is_throttled_without_storing_username(self):
+        for _ in range(auth.LOGIN_MAX_FAILURES):
+            self.assertEqual(self.login("unknown_member", "invalid").status_code, 401)
+        self.assertEqual(self.login("unknown_member", "invalid").status_code, 429)
+        import sqlite3
+        with sqlite3.connect(auth.AUTH_DB_PATH) as connection:
+            subjects = [row[0] for row in connection.execute("SELECT subject FROM login_failures")]
+        self.assertEqual(len(subjects), 1)
+        self.assertNotIn("unknown_member", subjects)
+
+    def test_success_clears_prior_failures(self):
+        self.assertEqual(self.login("designer1", "wrong").status_code, 401)
+        self.assertEqual(self.login("designer1", "strong-designer-pass-123").status_code, 200)
+        self.assertEqual(auth.login_retry_after("designer1"), 0)
+        import sqlite3
+        with sqlite3.connect(auth.AUTH_DB_PATH) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM login_failures").fetchone()[0], 0)
+
     def test_creation_guards(self):
         with self.assertRaises(ValueError):
             auth.create_user("x", "too-short", "ADMIN")
