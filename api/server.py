@@ -51,7 +51,8 @@ TRUSTED_BROWSER_ORIGINS = (
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=TRUSTED_BROWSER_ORIGINS,
+    allow_origins=(*TRUSTED_BROWSER_ORIGINS,
+                   *([tls_policy.public_origin()] if tls_policy.deployment_mode() == "direct-tls" else [])),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-CSRF-Token"],
@@ -199,7 +200,8 @@ def auth_login(credentials: auth.LoginPayload, response: Response):
 @app.post("/api/v1/auth/logout")
 def auth_logout(request: Request, response: Response):
     auth.end_session(request.cookies.get(auth.SESSION_COOKIE))
-    response.delete_cookie(auth.SESSION_COOKIE, path="/", httponly=True, samesite="strict")
+    response.delete_cookie(auth.SESSION_COOKIE, path="/", httponly=True, samesite="strict",
+                           secure=tls_policy.deployment_mode() == "direct-tls")
     return {"authenticated": False}
 
 
