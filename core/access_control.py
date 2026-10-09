@@ -24,6 +24,8 @@ from pydantic import BaseModel, Field
 AUTH_DB_PATH = Path(__file__).resolve().parents[1] / "output" / "auth.sqlite3"
 SESSION_SECONDS = 8 * 3600
 SESSION_COOKIE = "ajan_session"
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_MAX_FAILURES = 5
 Role = Literal["ADMIN", "DESIGNER", "OPERATOR"]
 
 
@@ -72,7 +74,64 @@ def connection() -> sqlite3.Connection:
         expires_at INTEGER NOT NULL,
         FOREIGN KEY (username) REFERENCES users(username)
     )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS login_failures (
+        subject TEXT PRIMARY KEY,
+        attempts INTEGER NOT NULL,
+        started_at INTEGER NOT NULL,
+        blocked_until INTEGER NOT NULL DEFAULT 0
+    )""")
     return db
+
+
+def _login_subject(username: str) -> str:
+    # Do not persist the supplied username; store a deterministic digest.
+    return hashlib.sha256(username.strip().casefold().encode("utf-8")).hexdigest()
+
+
+def login_retry_after(username: str) -> int:
+    """Return remaining lockout seconds, using the persistent SQLite store."""
+    db = connection()
+    try:
+        row = db.execute("SELECT blocked_until FROM login_failures WHERE subject=?",
+                         (_login_subject(username),)).fetchone()
+    finally:
+        db.close()
+    return max(0, row["blocked_until"] - int(time.time())) if row else 0
+
+
+def record_failed_login(username: str) -> int:
+    """Atomically count failed attempts; applies equally to known/unknown users."""
+    now = int(time.time())
+    subject = _login_subject(username)
+    db = connection()
+    try:
+        with db:
+            db.execute("DELETE FROM login_failures WHERE blocked_until < ? AND started_at < ?",
+                       (now, now - LOGIN_WINDOW_SECONDS))
+            row = db.execute("SELECT attempts, started_at, blocked_until FROM login_failures WHERE subject=?",
+                             (subject,)).fetchone()
+            if row and row["blocked_until"] > now:
+                return row["blocked_until"] - now
+            attempts = (row["attempts"] if row and row["started_at"] > now - LOGIN_WINDOW_SECONDS else 0) + 1
+            blocked_until = now + LOGIN_WINDOW_SECONDS if attempts >= LOGIN_MAX_FAILURES else 0
+            db.execute("""INSERT INTO login_failures (subject, attempts, started_at, blocked_until)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(subject) DO UPDATE SET attempts=excluded.attempts,
+                started_at=excluded.started_at, blocked_until=excluded.blocked_until""",
+                (subject, attempts, row["started_at"] if row and
+                 row["started_at"] > now - LOGIN_WINDOW_SECONDS else now, blocked_until))
+            return max(0, blocked_until - now)
+    finally:
+        db.close()
+
+
+def clear_login_failures(username: str) -> None:
+    db = connection()
+    try:
+        with db:
+            db.execute("DELETE FROM login_failures WHERE subject=?", (_login_subject(username),))
+    finally:
+        db.close()
 
 
 def _password_hash(password: str, salt: bytes) -> bytes:
