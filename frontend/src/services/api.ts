@@ -1,9 +1,10 @@
+import { apiFetch } from './auth';
 import { AnalysisPipelineResult, LoomFormConfig } from '../types/carpet';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export async function checkBackendHealth(): Promise<{ status: string; engine: string }> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/health`);
+  const res = await apiFetch(`${API_BASE_URL}/api/v1/health`);
   if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`);
   return res.json();
 }
@@ -31,7 +32,7 @@ export async function runCarpetAnalysis(
   formData.append('enable_dereflection', config.enable_dereflection.toString());
   formData.append('symmetry_mode', config.symmetry_mode);
 
-  const res = await fetch(`${API_BASE_URL}/api/v1/analyze`, {
+  const res = await apiFetch(`${API_BASE_URL}/api/v1/analyze`, {
     method: 'POST',
     body: formData,
   });
@@ -49,7 +50,7 @@ export function getDownloadUrl(jobId: string, fileType: 'dxf' | 'svg' | 'loom' |
 }
 
 export async function fetchERPInventory(): Promise<any> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/erp/inventory`);
+  const res = await apiFetch(`${API_BASE_URL}/api/v1/erp/inventory`);
   if (!res.ok) throw new Error('ERP Envanteri alınamadı');
   return res.json();
 }
@@ -58,7 +59,7 @@ export async function uploadSpectroFile(file: File): Promise<any> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('register_palette', 'true');
-  const res = await fetch(`${API_BASE_URL}/api/v1/spectro/import`, {
+  const res = await apiFetch(`${API_BASE_URL}/api/v1/spectro/import`, {
     method: 'POST',
     body: formData
   });
@@ -88,24 +89,24 @@ export interface JobSummary {
   cost_tl: number;
 }
 export async function fetchJobs(): Promise<JobSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/jobs`);
+  const response = await apiFetch(`${API_BASE_URL}/api/v1/jobs`);
   if (!response.ok) throw new Error('Analiz geçmişi alınamadı.');
   return response.json();
 }
 export async function fetchJob(id: string): Promise<AnalysisPipelineResult> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(id)}`);
+  const response = await apiFetch(`${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(id)}`);
   if (!response.ok) throw new Error('Analiz açılamadı.');
   return response.json();
 }
 
 export interface DesignReview { id: string; reviewer: string; decision: 'DESIGN_ACCEPTED' | 'CHANGES_REQUESTED'; note: string; created_at: string; report_sha256: string }
 export async function fetchReviews(jobId: string): Promise<DesignReview[]> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(jobId)}/reviews`);
+  const res = await apiFetch(`${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(jobId)}/reviews`);
   if (!res.ok) throw new Error('İnceleme kayıtları yüklenemedi.');
   return res.json();
 }
 export async function saveReview(jobId: string, review: Pick<DesignReview, 'reviewer' | 'decision' | 'note'>): Promise<DesignReview> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(jobId)}/reviews`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(review) });
+  const res = await apiFetch(`${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(jobId)}/reviews`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(review) });
   if (!res.ok) throw new Error('İnceleme kaydedilemedi. Ad ve açıklamayı kontrol edin.');
   return res.json();
 }
