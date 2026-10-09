@@ -41,3 +41,10 @@ supplier_catalog.tmp
 # Logs & sqlite
 *.log
 *.sqlite3
+
+# Encrypted recovery archives and TLS private key material (never commit)
+*.ahb
+*.key
+*.pem
+*.p12
+*.pfx
