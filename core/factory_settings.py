@@ -67,10 +67,20 @@ class FactorySettings(BaseModel):
 
 _lock = threading.Lock()
 SETTINGS_PATH = Path(__file__).resolve().parents[1] / 'factory_settings.json'
+
+
+def active_settings_path() -> Path:
+    from core import access_control as auth
+    if auth.mode() == 'workspace':
+        return auth.workspace_directory() / 'factory_settings.json'
+    return SETTINGS_PATH
+
+
 def load_settings():
-    if not SETTINGS_PATH.exists():
+    path = active_settings_path()
+    if not path.exists():
         return FactorySettings()
-    return FactorySettings.model_validate_json(SETTINGS_PATH.read_text(encoding='utf-8'))
+    return FactorySettings.model_validate_json(path.read_text(encoding='utf-8'))
 
 def save_settings(settings):
     with _lock:
@@ -80,7 +90,8 @@ def save_settings(settings):
         from core.supplier_catalog import validate_yarn_sources
         validate_yarn_sources(settings.yarns)
         updated = settings.model_copy(update={'revision': current.revision+1, 'updated_at':datetime.now(timezone.utc).isoformat()})
-        temporary = SETTINGS_PATH.with_suffix('.tmp')
+        path = active_settings_path()
+        temporary = path.with_suffix('.tmp')
         temporary.write_text(updated.model_dump_json(indent=2), encoding='utf-8')
-        os.replace(temporary, SETTINGS_PATH)
+        os.replace(temporary, path)
         return updated
