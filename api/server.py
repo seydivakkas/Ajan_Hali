@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import uuid
 from starlette.concurrency import run_in_threadpool
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +27,7 @@ from core.pipeline import CarpetAnalysisPipeline
 from core.factory_settings import FactorySettings, load_settings, save_settings
 from core.demo_data import change_demo_inventory, mark_demo_result
 from core.supplier_catalog import SupplierCatalog, append_catalog, catalog_view, validate_matching_conditions
+from core.preflight import PreflightResult, evaluate_preflight
 
 app = FastAPI(
     title="Industrial Carpet AI: Competitor Photo to CAD & Yarn Recipe API",
@@ -276,7 +277,7 @@ def save_review(job_id: str, review: DesignReview):
 @app.get("/api/v1/jobs/{job_id}/download/{file_type}")
 def download_job_artifact(job_id: str, file_type: str):
     """
-    Download production-ready CAD & CAM files:
+    Download experimental design/review outputs (NOT validated production CAM):
     - dxf: AutoCAD DXF
     - svg: Scalable Vector Graphics
     - loom: Jacquard Loom Machine Instruction Matrix
@@ -387,7 +388,7 @@ async def analyze_carpet_photo(
     """
     Takes an unconstrained competitor carpet photo and loom parameters,
     runs FastSAM background isolation, dereflection, generative inpainting,
-    CIEDE2000 factory yarn matching, consumption calculations, and exports DXF, SVG, Van de Wiele (.EP) & Stäubli (.JC5) files.
+    CIEDE2000 factory yarn matching, consumption estimates, and unverified prototype DXF, SVG, Van de Wiele (.EP) & Stäubli (.JC5) exports.
     """
     settings = load_settings()
     if not settings.yarns or (not settings.company_name and not any(y.is_demo for y in settings.yarns)):
@@ -504,6 +505,29 @@ def get_studio_revision(job_id: str, revision: int):
         return studio.read_revision(job_directory(job_id),revision)
     except ValueError as error:
         raise HTTPException(404,str(error))
+
+
+@app.get('/api/v1/jobs/{job_id}/preflight', response_model=PreflightResult)
+def get_production_preflight(job_id: str, studio_revision: int | None = Query(default=None, ge=1)):
+    """Evidence report for an immutable analysis or a saved studio revision.
+
+    No pre-flight response is a manufacturer or authorized production approval.
+    """
+    report = get_job(job_id)
+    raw_report = (job_directory(job_id) / 'analysis_report.json').read_bytes()
+    report_sha = hashlib.sha256(raw_report).hexdigest()
+    evaluation = None
+    if studio_revision is not None:
+        from core import designer_studio as studio
+        try:
+            saved = studio.read_revision(job_directory(job_id), studio_revision)
+        except ValueError as error:
+            raise HTTPException(404, str(error))
+        if saved.get('job_id') != job_id or saved.get('revision') != studio_revision:
+            raise HTTPException(409, 'Stüdyo revizyonu analizle uyuşmuyor.')
+        evaluation = saved['evaluation']
+    return evaluate_preflight(report, report_sha,
+                              studio_revision=studio_revision, studio_evaluation=evaluation)
 
 
 # Mount frontend dist if built
