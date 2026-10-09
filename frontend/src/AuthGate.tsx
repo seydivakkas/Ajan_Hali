@@ -31,8 +31,8 @@ export function AuthGate() {
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-700">Bağlantı kontrol ediliyor…</div>;
 
   if (session) return <>
-    {session.mode === 'session' && <div className="flex justify-end items-center gap-4 px-5 py-2 bg-slate-900 text-white text-xs">
-      <span>{session.username} · {session.role}</span>
+    {session.mode !== 'local' && <div className="flex justify-end items-center gap-4 px-5 py-2 bg-slate-900 text-white text-xs">
+      <span>{session.workspace_id ? `${session.workspace_id} · ` : ''}{session.username} · {session.role}</span>
       <button type="button" className="underline" onClick={async () => {
         try { await logout(); setSession(null); } catch { setError('Çıkış yapılamadı.'); }
       }}>Çıkış yap</button>
