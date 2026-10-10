@@ -344,6 +344,9 @@ def list_jobs():
     items = []
     for path in active_output_dir().glob("*/analysis_report.json"):
         try:
+            progress = job_runtime.get_status(active_output_dir(), path.parent.name)
+            if progress is not None and progress.state != "SUCCEEDED":
+                continue
             report = AnalysisPipelineResult.model_validate_json(path.read_text(encoding="utf-8"))
             if report.data_source not in {"USER_FACTORY_INPUT", "DEMO_SYNTHETIC"}:
                 continue
