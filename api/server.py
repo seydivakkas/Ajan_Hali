@@ -556,6 +556,8 @@ async def analyze_carpet_photo(
     runs FastSAM background isolation, dereflection, generative inpainting,
     CIEDE2000 factory yarn matching, consumption estimates, and unverified prototype DXF, SVG, Van de Wiele (.EP) & Stäubli (.JC5) exports.
     """
+    if auth.mode() == "workspace":
+        raise HTTPException(409, "Firma modunda sınırlandırılmış /api/v1/analyze/jobs uç noktasını kullanın.")
     settings = load_settings()
     if not settings.yarns or (not settings.company_name and not any(y.is_demo for y in settings.yarns)):
         raise HTTPException(422, "Önce Fabrika Ayarları ekranında şirket adını ve gerçek iplik bilgilerini kaydedin.")
