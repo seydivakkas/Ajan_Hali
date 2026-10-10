@@ -104,7 +104,7 @@ async def enqueue_analysis(file: UploadFile = File(...), config: str = Form(...)
             result = worker.process(image_input=photo_path, loom_cfg=cfg, params=params,
                                     job_id=job_id, progress_callback=checkpoint,
                                     persist_report=False)
-            mark_demo_result(result, palette)
+            mark_demo_result(result, settings.yarns)
             result.factory_settings_revision = revision
             result.company_name = company
             job_runtime.check_output(root, job_id)
