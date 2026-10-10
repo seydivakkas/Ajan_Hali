@@ -26,8 +26,11 @@ from core.utils import imread_safe, imwrite_safe
 
 class CarpetAnalysisPipeline:
     """
-    Orchestrates the entire technical transition from competitor carpet photo
-    to production-ready DXF/Jakar CAD files and yarn recipes.
+    Orchestrates the technical transition from carpet imagery to preliminary
+    design-review DXF/SVG files, an experimental Jacquard matrix and yarn
+    consumption estimates. These are NOT manufacturer-validated production
+    instructions; physical measurements, vendor CAM compatibility and an
+    authorized production release remain unverified.
     """
 
     def __init__(self, palette_json_path: str | None = None, output_base_dir: str = "output", palette=None):
