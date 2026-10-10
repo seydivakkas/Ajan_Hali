@@ -569,6 +569,7 @@ async def analyze_carpet_photo(
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
+    analysis_job_id = None
 
     try:
         try:
@@ -610,10 +611,11 @@ async def analyze_carpet_photo(
                                      reed=loom_cfg.reed_density, pick=loom_cfg.pick_density)
         except ValueError as error:
             raise HTTPException(422, str(error))
+        analysis_job_id = "JOB-" + uuid.uuid4().hex[:12].upper()
         worker = CarpetAnalysisPipeline(output_base_dir=str(active_output_dir()), palette=[y.model_dump() for y in settings.yarns])
         result = await run_in_threadpool(
             worker.process, image_input=tmp_path, loom_cfg=loom_cfg, params=params,
-            persist_report=False
+            job_id=analysis_job_id, persist_report=False
         )
         job_runtime.check_output(active_output_dir(), result.job_id)
         mark_demo_result(result, settings.yarns)
@@ -635,6 +637,9 @@ async def analyze_carpet_photo(
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+        if (analysis_job_id is not None and not
+                (active_output_dir() / analysis_job_id / "analysis_report.json").is_file()):
+            shutil.rmtree(active_output_dir() / analysis_job_id, ignore_errors=True)
 
 
 from core import designer_studio as studio
