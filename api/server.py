@@ -16,6 +16,8 @@ import secrets
 import logging
 from datetime import datetime, timezone
 import uuid
+import asyncio
+import io
 from starlette.concurrency import run_in_threadpool
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, Query, Response
@@ -33,6 +35,7 @@ from core import evidence_registry as evidence
 from core import access_control as auth
 from core import tls_policy
 from core import security_audit
+from core import job_runtime
 
 app = FastAPI(
     title="Industrial Carpet AI: Competitor Photo to CAD & Yarn Recipe API",
@@ -341,6 +344,9 @@ def list_jobs():
     items = []
     for path in active_output_dir().glob("*/analysis_report.json"):
         try:
+            progress = job_runtime.get_status(active_output_dir(), path.parent.name)
+            if progress is not None and progress.state != "SUCCEEDED":
+                continue
             report = AnalysisPipelineResult.model_validate_json(path.read_text(encoding="utf-8"))
             if report.data_source not in {"USER_FACTORY_INPUT", "DEMO_SYNTHETIC"}:
                 continue
@@ -357,6 +363,9 @@ def list_jobs():
 
 @app.get("/api/v1/jobs/{job_id}", response_model=AnalysisPipelineResult)
 def get_job(job_id: str):
+    status = job_runtime.get_status(active_output_dir(), job_id)
+    if status is not None and status.state != "SUCCEEDED":
+        raise HTTPException(409, "Analiz tamamlanmadı; işin durumunu kontrol edin.")
     path = job_directory(job_id) / "analysis_report.json"
     if not path.is_file():
         raise HTTPException(404, "Analiz bulunamadı")
@@ -547,6 +556,8 @@ async def analyze_carpet_photo(
     runs FastSAM background isolation, dereflection, generative inpainting,
     CIEDE2000 factory yarn matching, consumption estimates, and unverified prototype DXF, SVG, Van de Wiele (.EP) & Stäubli (.JC5) exports.
     """
+    if auth.mode() == "workspace":
+        raise HTTPException(409, "Firma modunda sınırlandırılmış /api/v1/analyze/jobs uç noktasını kullanın.")
     settings = load_settings()
     if not settings.yarns or (not settings.company_name and not any(y.is_demo for y in settings.yarns)):
         raise HTTPException(422, "Önce Fabrika Ayarları ekranında şirket adını ve gerçek iplik bilgilerini kaydedin.")
@@ -563,6 +574,7 @@ async def analyze_carpet_photo(
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
+    analysis_job_id = None
 
     try:
         try:
@@ -599,13 +611,18 @@ async def analyze_carpet_photo(
             symmetry_mode=symmetry_mode
         )
 
+        try:
+            job_runtime.check_limits(width_cm=loom_cfg.width_cm, length_cm=loom_cfg.length_cm,
+                                     reed=loom_cfg.reed_density, pick=loom_cfg.pick_density)
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        analysis_job_id = "JOB-" + uuid.uuid4().hex[:12].upper()
         worker = CarpetAnalysisPipeline(output_base_dir=str(active_output_dir()), palette=[y.model_dump() for y in settings.yarns])
         result = await run_in_threadpool(
-            worker.process,
-            image_input=tmp_path,
-            loom_cfg=loom_cfg,
-            params=params
+            worker.process, image_input=tmp_path, loom_cfg=loom_cfg, params=params,
+            job_id=analysis_job_id, persist_report=False
         )
+        job_runtime.check_output(active_output_dir(), result.job_id)
         mark_demo_result(result, settings.yarns)
         result.factory_settings_revision = settings.revision
         result.company_name = settings.company_name
@@ -625,6 +642,9 @@ async def analyze_carpet_photo(
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+        if (analysis_job_id is not None and not
+                (active_output_dir() / analysis_job_id / "analysis_report.json").is_file()):
+            shutil.rmtree(active_output_dir() / analysis_job_id, ignore_errors=True)
 
 
 from core import designer_studio as studio
@@ -764,6 +784,11 @@ def get_production_preflight(job_id: str, studio_revision: int | None = Query(de
     return evaluate_preflight(report, report_sha,
                               studio_revision=studio_revision, studio_evaluation=evaluation,
                               evidence_records=[r.model_dump(mode='json') for r in matched])
+
+
+# Background analysis routes are mounted before the catch-all frontend.
+from api.queued_analysis import router as queued_analysis_router
+app.include_router(queued_analysis_router)
 
 
 # Mount frontend dist if built

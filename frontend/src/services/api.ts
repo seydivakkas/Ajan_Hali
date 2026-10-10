@@ -9,40 +9,85 @@ export async function checkBackendHealth(): Promise<{ status: string; engine: st
   return res.json();
 }
 
+export interface AnalysisJobStatus {
+  job_id: string;
+  state: 'QUEUED' | 'RUNNING' | 'CANCEL_REQUESTED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+  stage: string;
+  percent: number;
+  error_code: string | null;
+  cancel_requested: boolean;
+}
+
+async function parseApiError(response: Response): Promise<string> {
+  const body = await response.json().catch(() => ({}));
+  return Array.isArray(body.detail)
+    ? body.detail.map((item: {loc?: string[], msg: string}) => item.msg).join('; ')
+    : body.detail || `HTTP ${response.status}`;
+}
+
+export async function cancelQueuedAnalysis(jobId: string): Promise<AnalysisJobStatus> {
+  const response = await apiFetch(`${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+  });
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return response.json();
+}
+
 export async function runCarpetAnalysis(
   file: File,
-  config: LoomFormConfig
+  config: LoomFormConfig,
+  onProgress?: (status: AnalysisJobStatus) => void
 ): Promise<AnalysisPipelineResult> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('manual_corners', JSON.stringify(config.manual_corners || null));
-  formData.append('repair_regions', JSON.stringify(config.repair_regions || []));
-  formData.append('weave_structure_factor', config.weave_structure_factor.toString());
-  formData.append('anchor_length_mm', config.anchor_length_mm.toString());
-  formData.append('width_cm', config.width_cm.toString());
-  formData.append('length_cm', config.length_cm.toString());
-  formData.append('reed_density', config.reed_density.toString());
-  formData.append('pick_density', config.pick_density.toString());
-  formData.append('pile_height_mm', config.pile_height_mm.toString());
-  formData.append('max_colors', config.max_colors.toString());
-  formData.append('order_quantity', config.order_quantity.toString());
-  formData.append('waste_coefficient', config.waste_coefficient.toString());
-  formData.append('enable_symmetry', config.enable_symmetry.toString());
-  formData.append('enable_sam', config.enable_sam.toString());
-  formData.append('enable_dereflection', config.enable_dereflection.toString());
-  formData.append('symmetry_mode', config.symmetry_mode);
+  // Every user-initiated submission has a unique idempotency key. The server
+  // binds it to a digest of the actual photo, config and company revision.
+  const requestBody = new FormData();
+  requestBody.append('file', file);
+  requestBody.append('config', JSON.stringify({
+    idempotency_key: crypto.randomUUID().replace(/-/g, ''),
+    loom_config: {
+      weave_structure_factor: config.weave_structure_factor,
+      anchor_length_mm: config.anchor_length_mm,
+      width_cm: config.width_cm,
+      length_cm: config.length_cm,
+      reed_density: config.reed_density,
+      pick_density: config.pick_density,
+      pile_height_mm: config.pile_height_mm,
+      max_colors: config.max_colors,
+      order_quantity: config.order_quantity,
+      waste_coefficient: config.waste_coefficient,
+    },
+    preprocessing_config: {
+      manual_corners: config.manual_corners || null,
+      repair_regions: config.repair_regions || [],
+      enable_symmetry_completion: config.enable_symmetry,
+      enable_sam_segmentation: config.enable_sam,
+      enable_dereflection: config.enable_dereflection,
+      symmetry_mode: config.symmetry_mode,
+    },
+  }));
 
-  const res = await apiFetch(`${API_BASE_URL}/api/v1/analyze`, {
-    method: 'POST',
-    body: formData,
+  const response = await apiFetch(`${API_BASE_URL}/api/v1/analyze/jobs`, {
+    method: 'POST', body: requestBody,
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(Array.isArray(err.detail) ? err.detail.map((e: any) => `${e.loc.join('.')}: ${e.msg}`).join('; ') : err.detail || 'Analiz sırasında hata oluştu.');
+  if (!response.ok) throw new Error(await parseApiError(response));
+  let status: AnalysisJobStatus = await response.json();
+  onProgress?.(status);
+  const deadline = Date.now() + 15 * 60 * 1000;
+  for (;;) {
+    if (status.state === 'SUCCEEDED') return fetchJob(status.job_id);
+    if (status.state === 'FAILED' || status.state === 'CANCELLED') {
+      throw new Error(`Analiz ${status.state}: ${status.error_code || status.stage}. Tekrar için yeni bir işlem başlatın.`);
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`Analiz zaman aşımına uğradı. İş ${status.job_id} sunucuda izlenmeye devam ediyor.`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const update = await apiFetch(
+      `${API_BASE_URL}/api/v1/jobs/${encodeURIComponent(status.job_id)}/status`);
+    if (!update.ok) throw new Error(await parseApiError(update));
+    status = await update.json();
+    onProgress?.(status);
   }
-
-  return res.json();
 }
 
 export function getDownloadUrl(jobId: string, fileType: 'dxf' | 'svg' | 'loom' | 'vdw' | 'staubli' | 'report'): string {

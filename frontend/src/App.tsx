@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 import { LoomFormConfig, AnalysisPipelineResult } from './types/carpet';
-import { checkBackendHealth, runCarpetAnalysis, fetchJobs, fetchJob, JobSummary } from './services/api';
+import { checkBackendHealth, runCarpetAnalysis, cancelQueuedAnalysis, fetchJobs, fetchJob, JobSummary, AnalysisJobStatus } from './services/api';
 import { FactorySettingsPanel } from './components/FactorySettingsPanel';
 import { DesignerTools } from './components/DesignerTools';
 import { ProductionStudio } from './components/ProductionStudio';
@@ -37,6 +37,7 @@ export const App: React.FC = () => {
   const [result, setResult] = useState<AnalysisPipelineResult | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [elapsed, setElapsed] = useState(0);
+  const [jobProgress, setJobProgress] = useState<AnalysisJobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [config, setConfig] = useState<LoomFormConfig>({
@@ -86,14 +87,16 @@ export const App: React.FC = () => {
   const handleAnalyze = async (file: File) => {
     if(studioDirty&&!window.confirm('Studio taslağı kaydedilmedi. Yeni analiz sonucuyla değiştirmek istiyor musunuz?'))return;
     setIsLoading(true);
+    setJobProgress(null);
     setError(null);
     try {
-      const data = await runCarpetAnalysis(file, config);
+      const data = await runCarpetAnalysis(file, config, setJobProgress);
       setResult(data);
       setActiveTab('visual');
     } catch (err: any) {
       setError(err.message || 'Halı analizi sırasında beklenmeyen bir hata oluştu.');
     } finally {
+      setJobProgress(null);
       setIsLoading(false);
     }
   };
@@ -159,8 +162,17 @@ export const App: React.FC = () => {
               Soldaki ayarlar yeni analiz için geçerlidir. İplik maliyeti tahminidir; işçilik ve enerji dahil değildir.
             </p>}
           </section>
-          {isLoading && <div role="status" className="mb-5 p-4 rounded-xl bg-sky-500/10 text-sky-300 text-sm">
-            İşlem sürüyor · {elapsed} saniye. Sonuç hazır olduğunda otomatik gösterilecek.
+          {isLoading && <div role="status" className="mb-5 p-4 rounded-xl bg-sky-500/10 text-sky-300 text-sm flex items-center justify-between gap-3">
+            <span>{jobProgress
+              ? `Analiz ${jobProgress.job_id} · ${jobProgress.state} · ${jobProgress.stage} · %${jobProgress.percent}`
+              : `İşlem hazırlanıyor · ${elapsed} saniye`}. Tamamlanana kadar üretim çıktıları kullanılamaz.</span>
+            {jobProgress && ['QUEUED', 'RUNNING'].includes(jobProgress.state) &&
+              <button type="button" onClick={async () => {
+                try { setJobProgress(await cancelQueuedAnalysis(jobProgress.job_id)); }
+                catch (e) { setError(e instanceof Error ? e.message : 'İptal isteği gönderilemedi.'); }
+              }} className="px-3 py-2 rounded border border-amber-500 text-amber-200">
+                İptal iste
+              </button>}
           </div>}
           {/* Error Banner if any */}
           {error && (

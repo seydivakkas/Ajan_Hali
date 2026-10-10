@@ -51,7 +51,9 @@ class CarpetAnalysisPipeline:
         image_input: Any,  # file path str or numpy array
         loom_cfg: LoomConfig,
         params: ImagePreprocessingParams,
-        job_id: Optional[str] = None
+        job_id: Optional[str] = None,
+        progress_callback=None,
+        persist_report: bool = True
     ) -> AnalysisPipelineResult:
         """Runs the entire end-to-end processing pipeline."""
         if job_id is None:
@@ -59,6 +61,12 @@ class CarpetAnalysisPipeline:
 
         job_dir = os.path.join(self.output_base_dir, job_id)
         os.makedirs(job_dir, exist_ok=True)
+
+        def checkpoint(stage, percentage):
+            if progress_callback is not None:
+                progress_callback(stage, percentage)
+
+        checkpoint("IMAGE_LOADING", 5)
 
         # 1. Load Image
         if isinstance(image_input, str):
@@ -72,6 +80,7 @@ class CarpetAnalysisPipeline:
         input_image_path = os.path.join(job_dir, "00_input.png")
         imwrite_safe(input_image_path, image_bgr)
 
+        checkpoint("RECTIFICATION", 15)
         # 2. Stage 1: Preprocessing & Rectification (with FastSAM AI & Dereflection)
         target_aspect = loom_cfg.length_cm / float(loom_cfg.width_cm)
         rectified_rgb, mask, rect_meta = preprocess_carpet_image(
@@ -85,6 +94,7 @@ class CarpetAnalysisPipeline:
         rectified_path = os.path.join(job_dir, "01_rectified.png")
         imwrite_safe(rectified_path, cv2.cvtColor(rectified_rgb, cv2.COLOR_RGB2BGR))
 
+        checkpoint("PATTERN_COMPLETION", 30)
         # 3. Stage 2: Pattern Inpainting & Symmetry / Generative Completion
         user_mask = None
         if params.repair_regions:
@@ -110,6 +120,7 @@ class CarpetAnalysisPipeline:
         completed_path = os.path.join(job_dir, "02_completed_pattern.png")
         imwrite_safe(completed_path, cv2.cvtColor(completed_rgb, cv2.COLOR_RGB2BGR))
 
+        checkpoint("COLOR_QUANTIZATION", 48)
         # 4. Stage 3 & 4: Color Space Conversion, CIEDE2000 Quantization
         quant_rgb, index_map, color_stats, color_metrics = self.quantizer.quantize_and_map(
             image_rgb=completed_rgb,
@@ -120,6 +131,7 @@ class CarpetAnalysisPipeline:
         quant_preview_path = os.path.join(job_dir, "03_quantized_palette.png")
         imwrite_safe(quant_preview_path, cv2.cvtColor(quant_rgb, cv2.COLOR_RGB2BGR))
 
+        checkpoint("GRID_RESAMPLING", 62)
         # 5. Stage 5: Loom Grid & CAM Resampling
         n_warp, n_weft, knot_aspect = compute_loom_grid_dimensions(
             loom_cfg.width_cm, loom_cfg.length_cm, loom_cfg.reed_density, loom_cfg.pick_density
@@ -131,6 +143,7 @@ class CarpetAnalysisPipeline:
                             area_percentage=float(np.count_nonzero(loom_grid == s["palette_index"])) / loom_grid.size * 100)
                        for s in color_stats if np.any(loom_grid == s["palette_index"])]
 
+        checkpoint("YARN_RECIPE", 73)
         # 6. Stage 6: Textile Physics & Yarn Consumption Calculation
         recipe_items, yarn_summary = calculate_yarn_recipe(
             loom_cfg=loom_cfg,
@@ -138,6 +151,7 @@ class CarpetAnalysisPipeline:
             palette_inventory=self.palette
         )
 
+        checkpoint("EXPORT_GENERATION", 82)
         # 7. Stage 7: Technical CAD & Direct Loom CAM File Generation
         dxf_path = os.path.join(job_dir, f"{job_id}_production.dxf")
         svg_path = os.path.join(job_dir, f"{job_id}_vector.svg")
@@ -168,6 +182,7 @@ class CarpetAnalysisPipeline:
             pick_density=loom_cfg.pick_density
         )
 
+        checkpoint("QUALITY_AUDIT", 92)
         # 8. Stage 8: Quality Scorer & Production Audit
         audit = audit_production_readiness(
             raw_image_rgb=cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB),
@@ -220,10 +235,13 @@ class CarpetAnalysisPipeline:
             audit=audit
         )
 
-        # Save result JSON for inspection
-        result_json_path = os.path.join(job_dir, "analysis_report.json")
-        with open(result_json_path + ".tmp", "w", encoding="utf-8") as f:
-            f.write(result.model_dump_json(indent=2))
-        os.replace(result_json_path + ".tmp", result_json_path)
+        # API execution sets persist_report=False: only the API can commit a
+        # fully validated report after provenance and output budget checks.
+        checkpoint("REPORT_READY", 96)
+        if persist_report:
+            result_json_path = os.path.join(job_dir, "analysis_report.json")
+            with open(result_json_path + ".tmp", "w", encoding="utf-8") as f:
+                f.write(result.model_dump_json(indent=2))
+            os.replace(result_json_path + ".tmp", result_json_path)
 
         return result
