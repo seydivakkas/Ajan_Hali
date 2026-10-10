@@ -327,9 +327,9 @@ def role_allows(role: str, method: str, path: str) -> bool:
             return True
         return path == "/api/v1/jobs" or path.startswith("/api/v1/jobs/") or path.startswith("/static/")
     if role == "DESIGNER" and method == "POST":
-        if path == "/api/v1/analyze" or path == "/api/v1/spectro/import":
+        if path in {"/api/v1/analyze", "/api/v1/analyze/jobs", "/api/v1/spectro/import"}:
             return True
-        if re.fullmatch(r"/api/v1/jobs/[A-Za-z0-9_-]{1,80}/(?:quote|reviews|studio/revisions|evidence)", path):
+        if re.fullmatch(r"/api/v1/jobs/[A-Za-z0-9_-]{1,80}/(?:quote|reviews|studio/revisions|evidence|cancel)", path):
             return True
     return False
 
