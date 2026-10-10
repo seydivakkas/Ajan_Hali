@@ -106,6 +106,41 @@ class AnalysisQueueTests(unittest.TestCase):
         self.assertIsNone(job_runtime.get_status(a,two.job_id))
         self.assertIsNone(job_runtime.get_status(b,one.job_id))
 
+    def test_concurrent_workers_are_serialized(self):
+        from concurrent.futures import ThreadPoolExecutor
+        first,_=self.add("concurrent_key_one")
+        second,_=self.add("concurrent_key_two")
+        lock=threading.Lock()
+        running=[0]
+        maximum=[0]
+        def work(checkpoint):
+            with lock:
+                running[0] += 1
+                maximum[0] = max(maximum[0],running[0])
+            checkpoint("INFER",30)
+            time.sleep(.035)
+            with lock:
+                running[0] -= 1
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results=[pool.submit(job_runtime.run_bounded,self.root,job_id,work)
+                     for job_id in (first.job_id,second.job_id)]
+            for result in results:
+                result.result()
+        self.assertEqual(maximum[0],1)
+        for job_id in (first.job_id,second.job_id):
+            self.assertEqual(job_runtime.get_status(self.root,job_id).state,"SUCCEEDED")
+
+    def test_cancel_race_cannot_promote_to_success(self):
+        first,_=self.add("cancel_race_request")
+        original=job_runtime._finish_if_active
+        def cancel_before_commit(root,job_id):
+            job_runtime.cancel(root,job_id)
+            original(root,job_id)
+        with patch.object(job_runtime,"_finish_if_active",side_effect=cancel_before_commit):
+            with self.assertRaises(job_runtime.JobCancelled):
+                job_runtime.run_bounded(self.root,first.job_id,lambda checkpoint: None)
+        self.assertEqual(job_runtime.get_status(self.root,first.job_id).state,"CANCELLED")
+
     def test_end_to_end_background_response_and_completed_report(self):
         item=dict(code='ASYNC',name='Test Yarn',material='test fiber',
             dtex=1800,rgb=[1,1,1],lab=[50,0,0],color_source='MEASURED_LAB',
@@ -155,6 +190,16 @@ class AnalysisQueueTests(unittest.TestCase):
                 self.assertEqual(report.json()["job_id"],identifier)
                 self.assertEqual(
                     client.get(f"/api/v1/jobs/{identifier}/download/report").status_code,200)
+                # Even a forged on-disk report must not be listed or downloaded
+                # while the matching durable job state is non-terminal.
+                job_runtime._update(self.root,identifier,state="RUNNING",
+                                    stage="SIMULATED_INTERRUPTION",percent=70)
+                self.assertEqual(client.get(f"/api/v1/jobs/{identifier}").status_code,409)
+                self.assertEqual(client.get(f"/api/v1/jobs/{identifier}/download/report").status_code,409)
+                self.assertNotIn(identifier,
+                    [row["job_id"] for row in client.get("/api/v1/jobs").json()])
+                job_runtime._update(self.root,identifier,state="SUCCEEDED",
+                                    stage="COMPLETED",percent=100)
                 changed=dict(fields,idempotency_key="async_fixture_request_1",
                              loom_config=dict(fields["loom_config"],order_quantity=2))
                 conflict=client.post("/api/v1/analyze/jobs",
