@@ -173,9 +173,12 @@ def run_bounded(root: Path, job_id: str, work) -> None:
 
         def checkpoint(stage: str, percent: int) -> None:
             current = get_status(root,job_id)
-            if (current is None or current.cancel_requested or
-                    time.monotonic()-started > MAX_RUNTIME_SECONDS):
-                raise JobCancelled("Cancelled or cooperative runtime deadline exceeded.")
+            if current is None or current.cancel_requested:
+                raise JobCancelled("Cancellation was requested.")
+            if time.monotonic()-started > MAX_RUNTIME_SECONDS:
+                raise TimeoutError("Cooperative runtime deadline exceeded.")
+            if (root / job_id).exists():
+                check_output(root, job_id)
             _update(root,job_id,state="RUNNING",stage=stage,percent=percent)
 
         try:
@@ -183,12 +186,18 @@ def run_bounded(root: Path, job_id: str, work) -> None:
             checkpoint("FINALIZING", 99)
             _update(root,job_id,state="SUCCEEDED",stage="COMPLETED",percent=100)
         except JobCancelled:
+            import shutil
+            shutil.rmtree(root / job_id, ignore_errors=True)
             _update(root,job_id,state="CANCELLED",stage="CANCELLED",percent=0,
-                    error_code="CANCELLED_OR_DEADLINE")
+                    error_code="USER_CANCELLED")
             raise
-        except Exception:
+        except Exception as error:
+            import shutil
+            shutil.rmtree(root / job_id, ignore_errors=True)
             _update(root,job_id,state="FAILED",stage="FAILED",percent=0,
-                    error_code="PROCESSING_FAILED")
+                    error_code="COOPERATIVE_DEADLINE" if isinstance(error, TimeoutError)
+                    else "RESOURCE_LIMIT" if isinstance(error, ValueError)
+                    else "PROCESSING_FAILED")
             raise
 
 
