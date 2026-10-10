@@ -144,6 +144,22 @@ def _update(root: Path, job_id: str, *, state: str, stage: str,
         db.close()
 
 
+def _finish_if_active(root: Path, job_id: str) -> None:
+    """Atomically resolve the race between final completion and cancellation."""
+    db = _database(root)
+    try:
+        with db:
+            updated = db.execute("""UPDATE analysis_jobs SET
+                state='SUCCEEDED',stage='COMPLETED',percent=100,
+                error_code=NULL,updated_at=?
+                WHERE job_id=? AND state='RUNNING' AND cancel_requested=0""",
+                (_now(),job_id)).rowcount
+            if updated != 1:
+                raise JobCancelled("Cancellation won the completion race.")
+    finally:
+        db.close()
+
+
 def cancel(root: Path, job_id: str) -> JobStatus | None:
     db = _database(root)
     try:
@@ -184,7 +200,7 @@ def run_bounded(root: Path, job_id: str, work) -> None:
         try:
             work(checkpoint)
             checkpoint("FINALIZING", 99)
-            _update(root,job_id,state="SUCCEEDED",stage="COMPLETED",percent=100)
+            _finish_if_active(root, job_id)
         except JobCancelled:
             import shutil
             shutil.rmtree(root / job_id, ignore_errors=True)
