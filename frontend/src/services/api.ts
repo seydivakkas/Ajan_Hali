@@ -43,7 +43,7 @@ export async function runCarpetAnalysis(
   const requestBody = new FormData();
   requestBody.append('file', file);
   requestBody.append('config', JSON.stringify({
-    idempotency_key: crypto.randomUUID().replaceAll('-', ''),
+    idempotency_key: crypto.randomUUID().replace(/-/g, ''),
     loom_config: {
       weave_structure_factor: config.weave_structure_factor,
       anchor_length_mm: config.anchor_length_mm,
