@@ -776,6 +776,11 @@ def get_production_preflight(job_id: str, studio_revision: int | None = Query(de
                               evidence_records=[r.model_dump(mode='json') for r in matched])
 
 
+# Background analysis routes are mounted before the catch-all frontend.
+from api.queued_analysis import router as queued_analysis_router
+app.include_router(queued_analysis_router)
+
+
 # Mount frontend dist if built
 FRONTEND_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
 if os.path.isdir(FRONTEND_DIST):
