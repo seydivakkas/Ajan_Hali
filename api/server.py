@@ -32,6 +32,7 @@ from core.preflight import PreflightResult, evaluate_preflight
 from core import evidence_registry as evidence
 from core import access_control as auth
 from core import tls_policy
+from core import security_audit
 
 app = FastAPI(
     title="Industrial Carpet AI: Competitor Photo to CAD & Yarn Recipe API",
@@ -93,6 +94,14 @@ async def protect_local_data(request: Request, call_next):
 
     async def response_with_security():
         result = await call_next(request)
+        if (auth.mode() == "workspace" and getattr(request.state, "principal", None)
+                and getattr(request.state, "audit_enabled", False)):
+            # Explicit RESULT paired with a durable ATTEMPT. No request secrets
+            # or query strings are ever retained in the audit database.
+            security_audit.write_event(
+                jobs_dir=active_output_dir(), username=request.state.principal["username"],
+                role=request.state.principal["role"], method=request.method,
+                path=request.url.path, phase="RESULT", status=result.status_code)
         if direct_tls:
             result.headers["Strict-Transport-Security"] = "max-age=31536000"
             result.headers["X-Content-Type-Options"] = "nosniff"
@@ -119,17 +128,37 @@ async def protect_local_data(request: Request, call_next):
         if not csrf or not secrets.compare_digest(csrf, principal["csrf_token"]):
             return JSONResponse(status_code=403, content={"detail": "CSRF doğrulaması başarısız."})
 
-    if path != "/api/v1/auth/logout" and not auth.role_allows(principal["role"], request.method, path):
-        return JSONResponse(status_code=403, content={"detail": "Bu işlem için yetki yok."})
+    permitted = path == "/api/v1/auth/logout" or auth.role_allows(
+        principal["role"], request.method, path)
     if auth.mode() == "workspace":
         workspace_id = principal.get("workspace_id")
         if not workspace_id:
             return JSONResponse(status_code=403, content={"detail": "Firma alanı atanmamış."})
         token = auth.set_workspace_context(workspace_id)
         try:
+            # Audit successful and denied sensitive operations within the same
+            # workspace. Invalid paths cannot inject free-form log contents.
+            auditable = (request.method in {"POST", "PUT", "PATCH", "DELETE"}
+                         or "/download/" in path or path.startswith("/static/"))
+            auditable = auditable and path.startswith(("/api/v1/", "/static/"))
+            auditable = auditable and len(path) <= 256 and bool(
+                re.fullmatch(r"/[A-Za-z0-9_./-]*", path))
+            if auditable:
+                security_audit.write_event(jobs_dir=active_output_dir(),
+                    username=principal["username"], role=principal["role"],
+                    method=request.method, path=path, phase="ATTEMPT")
+                request.state.audit_enabled = True
+            if not permitted:
+                if auditable:
+                    security_audit.write_event(jobs_dir=active_output_dir(),
+                        username=principal["username"], role=principal["role"],
+                        method=request.method, path=path, phase="RESULT", status=403)
+                return JSONResponse(status_code=403, content={"detail": "Bu işlem için yetki yok."})
             return await response_with_security()
         finally:
             auth.clear_workspace_context(token)
+    if not permitted:
+        return JSONResponse(status_code=403, content={"detail": "Bu işlem için yetki yok."})
     return await response_with_security()
 
 
